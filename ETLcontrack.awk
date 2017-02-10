@@ -143,9 +143,9 @@ BEGIN{
 	    } else {
 		if ( ( "find /dev/stdout 2>/dev/null" | getline i ) > 0 )
 			STATEFILE = "/dev/stdout";
-		else if ( ( "find /dev/tty 2>/dev/null" | getline i ) > 0 )
+		    else if ( ( "find /dev/tty 2>/dev/null" | getline i ) > 0 )
 			STATEFILE = "/dev/tty";
-		else
+		    else
 			STATEFILE = "CON";
 		close( "find /dev/stdout 2>/dev/null" );
 		close( "find /dev/tty 2>/dev/null" );
