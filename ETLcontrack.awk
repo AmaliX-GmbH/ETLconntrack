@@ -23,6 +23,9 @@
 # on AIX or HP-UX:
 #	netstat -an -f inet | awk -f ETLconntrack.awk
 # 
+# on Windows:
+#	netstat -an | awk -f ETLconntrack.awk
+# 
 # 
 # parameters considered to be used frequently
 # -v STATEFILE=$PATH/$FILE.csv 
@@ -46,7 +49,7 @@
 # -v LOGFILE=$PATH/$FILE.log
 # 
 # 
-# v2.98 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
+# v2.99 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -193,7 +196,7 @@ BEGIN{
 	    }
 
 	#
-	if (( OS == "" ) && ( "uname -s" | getline OS ) > 0 && ( OS != "Linux" && OS != "SunOS" && OS != "HP-UX" && OS != "AIX" )) {
+	if (( OS == "" ) && ( "uname -s" | getline OS ) > 0 && ( OS != "Linux" && OS != "SunOS" && OS != "HP-UX" && OS != "AIX" && OS != "windows32" )) {
 		print "ERROR: Unknown OS \"" OS "\"!\n   Please gather netstat-data manually and run skript on supported awk-version.\n" > LOGFILE;
 		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) { 
 		    } else
@@ -270,6 +273,20 @@ BEGIN{
 
 			while ( ( CMD | getline i ) > 0 )
 				++localIPs[i];
+			close( CMD );
+
+		    } else if ( OS == "windows32" ) {
+			CMD = "ipconfig /all"
+			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+				print "Command to figure out IPs: " CMD > LOGFILE;
+			    }
+			while ( ( CMD | getline i ) > 0 ) {
+				if ( tolower( i ) ~ /ipv4-ad/ ) {
+					IP = substr( i, 2 + index( i, ": " ) );
+					sub( /[^0-9.]*$/, "", IP );
+					++localIPs[ IP ];
+				}
+			    }
 			close( CMD );
 		    }
 
@@ -393,6 +410,23 @@ BEGIN{
 				    }
 			    }
 			close( CMD );
+
+		    } else if ( OS == "windows32" ) {
+		    	CMD = "netstat -an";
+			while (( CMD | getline i) > 0) {
+				if ( i ~ /^[ ]*TCP/ || i ~ /^[ ]*UDP/ ) {
+					lastColumn = split( i, Service );
+					if ( Service[ 1 ] ~ /^TCP/ && Service[ 3 ] ~ /:0$/ ) {
+						port = replace( "^.*[.:]", "", Service[ 2 ] );
+						SERVICES[ replace( "[46]$", "", tolower( Service[ 1 ] ) ) "/" port ] = ( daemon != "" ? daemon : "-" );
+
+					    } else if ( Service[ 1 ] ~ /^[ ]*UDP/ && Service[ 3 ] == "*:*" ) {
+						port = replace( "^.*[.:]", "", Service[ 2 ] );
+						SERVICES[ replace( "[46]$", "", tolower( Service[ 1 ] ) ) "/" port ] = ( daemon != "" ? daemon : "-" );
+					    }
+				    }
+			    }
+			close( CMD );
 		    }
 
 		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
@@ -409,10 +443,11 @@ BEGIN{
 			print "No commandline-arguments are provided." > LOGFILE;
 		    }
 
-		if (( "LC_ALL=C tty" | getline STDIN ) > 0 && STDIN ~ /\// ) {
+		CMD = ( OS != "windows32" ? "LC_ALL=C tty" : "tty" );
+		if (( CMD | getline STDIN ) > 0 && STDIN ~ /\// ) {
 			# STDIN is a tty, no conntrack-data is to be read from it
 
-			close( "LC_ALL=C tty" );
+			close( CMD );
 			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 				print "STDIN: " STDIN > LOGFILE;
 			    }
@@ -454,7 +489,7 @@ BEGIN{
 		    } else {
 			# STDIN is not a tty, conntrack-data can be tried to be read from it
 
-			close( "LC_ALL=C tty" );
+			close( CMD );
 			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 				print "STDIN: " STDIN > LOGFILE;
 			    }
@@ -665,8 +700,47 @@ BEGIN{
 			CONNTRACK[ "dst" ] = CONNTRACK[ "remoteIP" ];
 		    }
 
+	    } else if (	LINE[ 2 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[:.][0-9]+/ &&	\
+			LINE[ 3 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[:.][0-9]+/ &&	\
+			tolower( LINE[ 1 ] ) in L4PROTOCOLS ) {
+
+		## windows32
+		#C:\Documents and Settings\administrator> netstat -an
+		#Active Connections
+		#  Proto  Local Address          Foreign Address        State
+		#  TCP    10.198.0.143:1811      10.193.9.211:2049      ESTABLISHED
+		#  TCP    10.198.0.143:1816      10.193.9.210:2049      ESTABLISHED
+		#  TCP    10.198.0.143:3389      10.119.105.211:50651   ESTABLISHED
+
+		++NOTICE[ "Input apparently from netstat on Windows..." ];
+
+		if ( tolower( LINE[ 4 ] ) ~ /established/ || tolower( LINE[ 4 ] ) ~ /hergestellt/ )
+			CONNTRACK[ "persistence" ] = 61;
+		    else if ( tolower( LINE[ 4 ] ) ~ /wait/ || tolower( LINE[ 4 ] ) ~ /wartend/ )
+			CONNTRACK[ "persistence" ] = 59;
+		    else
+			next;
+
+		if ( LINE[ 2 ] !~ /\[[0-9a-f:]*\]:/ )
+			CONNTRACK[ "l3proto" ] = "ipv4";
+		    else
+			CONNTRACK[ "l3proto" ] = "ipv6";
+		CONNTRACK[ "l4proto" ] = replace( "[46]$", "", tolower( LINE[ 1 ] ) );
+
+		CONNTRACK[ "localPort" ] = replace( "^.*[.:]", "", LINE[ 2 ] );
+		CONNTRACK[ "sport" ] = CONNTRACK[ "localPort" ]
+
+		CONNTRACK[ "remotePort" ] = replace( "^.*[.:]", "", LINE[ 3 ] );
+		CONNTRACK[ "dport" ] = CONNTRACK[ "remotePort" ]
+
+		CONNTRACK[ "remoteIP" ] = replace( "[.:][0-9]+$", "", LINE[ 3 ] );
+		CONNTRACK[ "dst" ] = CONNTRACK[ "remoteIP" ];
+
+		CONNTRACK[ "localIP" ] = replace( "[.:][0-9]+$", "", LINE[ 2 ] );
+		CONNTRACK[ "src" ] = CONNTRACK[ "localIP" ];
+
 	    } else {
-		if ( $0 !~ /BOUND/ && $0 !~ /IDLE/ && $0 !~ /LISTEN/ && LINE[ 5 ] != "*.*" )
+		if ( $0 !~ /BOUND/ && $0 !~ /IDLE/ && $0 !~ /LISTEN/ && LINE[ 3 ] !~ /:0$/ && LINE[ 3 ] != "*:*" && LINE[ 5 ] != "*.*" )
 			++NOTICE[ "input line ignored: " $0 ];
 		next;
 	    }
