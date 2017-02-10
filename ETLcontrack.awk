@@ -45,7 +45,7 @@
 # -v LOGFILE=$PATH/$FILE.log
 # 
 # 
-# v2.94 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
+# v2.95 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -317,18 +317,28 @@ BEGIN{
 			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 				print "Command to figure out services: " CMD > LOGFILE;
 			    }
+
+			if ( ( getline i < "/proc/sys/net/ipv4/ip_local_port_range" ) > 0 )
+				split( i, Portrange );
+
 			while (( CMD | getline i) > 0) {
 
 				gsub( /[ ]+/, SUBSEP, i );
 				lastColumn = split( i, Service, SUBSEP );
 
-				if ( Service[ 1 ] in L4PROTOCOLS ) {
-					port = Service[ 4 ];
-					sub( /^.*[.:]/, "", port );
-					daemon = Service[ lastColumn -1 ];
-					sub( /[0-9]*\//, "", daemon );
-					SERVICES[ substr( Service[ 1 ], 1, 3 ) "/" port ] = ( daemon != "" ? daemon : "-" );
+				port = Service[ 4 ];
+				sub( /^.*[.:]/, "", port );
 
+				if ( index( Service[ lastColumn ], "/" ) )
+					daemon = Service[ lastColumn ];
+				    else if ( index( Service[ lastColumn -1 ], "/" ) )
+					daemon = Service[ lastColumn -1 ];
+				    else
+					daemon = "-";
+				sub( /[0-9]*\//, "", daemon );
+
+				if ( Service[ 1 ] in L4PROTOCOLS && !( port >= Portrange[ 1 ] && port <= Portrange[ 2 ] ) ) {
+					SERVICES[ substr( Service[ 1 ], 1, 3 ) "/" port ] = daemon;
 				    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 					print i > LOGFILE;
 				    }
@@ -336,6 +346,7 @@ BEGIN{
 			close( CMD );
 
 		    } else if ( OS == "SunOS" ) {
+			# combined command "netstat -f inet -f inet6 -P ..." is not supported by Solaris < v10
 			CMD = "netstat -f inet -P tcp -an 2>/dev/null | awk '{ print $NF,$1;}'; netstat -f inet6 -P tcp -an 2>/dev/null | awk '{ print $NF,$1;}'"
 			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 				print "Command to figure out services: " CMD > LOGFILE;
@@ -683,7 +694,12 @@ BEGIN{
 
 	# conjecture direction
 	if ( CONNTRACK[ "direction" ] == "foreign" ) {
-		# FixMe: do something
+		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+			for ( i in CONNTRACK )
+				printf( "%s=%s\n", i, CONNTRACK[i] ) > LOGFILE;
+			printf( "\n" );
+			next;
+		    }
 	    } else if ( CONNTRACK[ "direction" ] == "local" ) {
 		if ( CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "sport" ] in SERVICES ) {
 			CONNTRACK[ "remotePort" ] = CONNTRACK[ "sport" ];
@@ -696,7 +712,8 @@ BEGIN{
 		CONNTRACK[ "server" ] = "localhost";
 		CONNTRACK[ "service" ] = CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "remotePort" ];
 		CONNTRACK[ "localPort" ] = 0;
-	    } else if (! ( CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "localPort" ] in SERVICES )) {
+	    } else if ( ( CONNTRACK[ "remotePort" ] < 2**10 && CONNTRACK[ "localPort" ] > CONNTRACK[ "remotePort" ] ) ||	\
+		    ! ( CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "localPort" ] in SERVICES )) {
 		CONNTRACK[ "direction" ] = "outgoing";
 		CONNTRACK[ "client" ] = CONNTRACK[ "localIP" ];
 		CONNTRACK[ "server" ] = CONNTRACK[ "remoteIP" ];
@@ -707,7 +724,7 @@ BEGIN{
 		CONNTRACK[ "client" ] = CONNTRACK[ "localIP" ];
 		CONNTRACK[ "server" ] = CONNTRACK[ "remoteIP" ];
 		CONNTRACK[ "service" ] = CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "remotePort" ];
-	    } else if ( CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "localPort" ] in SERVICES ) {
+	    } else if ( CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "localPort" ] in SERVICES && CONNTRACK[ "localPort" ] < 2**15 ) {
 		CONNTRACK[ "direction" ] = "incoming";
 		CONNTRACK[ "client" ] = CONNTRACK[ "remoteIP" ];
 		CONNTRACK[ "server" ] = CONNTRACK[ "localIP" ];
