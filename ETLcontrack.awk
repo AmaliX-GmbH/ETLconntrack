@@ -1,17 +1,23 @@
 #!/bin/awk -f
+#
 # see http://www.iptables.info/en/connection-state.html
 # 
 # ./bin/ETLcontrack.awk 
 # 
 # accepted parameters:
-# -v OutputFormat="l4proto,service,direction,localIP,remoteIP,counter"
+# -v OutputFormat="service,direction,localIP,remoteIP,counter"
 # -v STATEFILE=$PATH/$FILE.csv 
 # -v IPblacklist="127.0.0.1 192.168.49.1"
 # -v IPwhitelist="10.119.146.19 10.110.7.244"
 # -v PORTblacklist="22 111 2048 2049"
-# -v L4Ports="udp/123"	NOT to be used beyond special circumstances!
+# -v Services="udp/123"	NOT to be used beyond special circumstances!
 # -v HOSTNAME="myname"	NOT to be used beyond special circumstances!
 # *_conntrack-file	if another file beyond /proc/net/ip_conntrack or /proc/net/nf_conntrack is to be read
+# 
+# (C) 2016 by Henning Rohde, hero@amalix.de
+# feel free to ask for further customization
+# 
+# FixMe: No IPv6 yet
 # 
 
 BEGIN {
@@ -19,15 +25,17 @@ BEGIN {
 
 	# Define fields in Output and StateFile
 	if ( OutputFormat != "" ) {
-		if ( OutputFormat ~ /,/ )
+		if ( OutputFormat ~ SUBSEP )
 			FORMATWIDTH = split( OutputFormat, OUTPUTFORMAT, SUBSEP );
 		    else
 			FORMATWIDTH = split( OutputFormat, OUTPUTFORMAT );
-	    } else
+	    } else {
 		FORMATWIDTH = split( "hostname,service,direction,localIP,localPort,remoteIP,remotePort,daemon,counter", OUTPUTFORMAT, "," );
 #		FORMATWIDTH = split( "l4proto,localIP,localPort,remoteIP,remotePort,counter", OUTPUTFORMAT, "," );
 #		FORMATWIDTH = split( "service,direction,localIP,remoteIP,counter", OUTPUTFORMAT, "," );
 #		FORMATWIDTH = split( "service,client,server,counter", OUTPUTFORMAT, "," );
+	    }
+
 	# predefine Index as Headline
 	INDEX=OUTPUTFORMAT[1];
 	for ( i=2; OUTPUTFORMAT[i] != ""; i++ )
@@ -54,7 +62,7 @@ BEGIN {
 
 	# blacklist local or remote IPs
 	if ( IPblacklist != "" ) {
-		if ( IPblacklist ~ /,/ )
+		if ( IPblacklist ~ SUBSEP )
 			split( IPblacklist, IPBLACKLIST, SUBSEP );
 		    else
 			split( IPblacklist, IPBLACKLIST );
@@ -71,7 +79,7 @@ BEGIN {
 
 	# blacklist local or remote Ports
 	if ( PORTblacklist != "" ) {
-		if ( PORTblacklist ~ /,/ )
+		if ( PORTblacklist ~ SUBSEP )
 			split( PORTblacklist, PORTBLACKLIST, SUBSEP );
 		    else
 			split( PORTblacklist, PORTBLACKLIST );
@@ -103,14 +111,14 @@ BEGIN {
 	#
 	if ( IPwhitelist != "" ) {
 		# only specific IPWHITELIST are to be analyzed
-		if ( IPwhitelist ~ /,/ )
+		if ( IPwhitelist ~ SUBSEP )
 			split( IPwhitelist, IPWHITELIST, SUBSEP );
 		    else
 			split( IPwhitelist, IPWHITELIST );
 		# transponate values to indices for easier searching
 		for ( i in IPWHITELIST ) {
-			IPWHITELIST[IPWHITELIST[i]]=i;
 			delete IPBLACKLIST[IPWHITELIST[i]];
+			IPWHITELIST[IPWHITELIST[i]]=i;
 			delete IPWHITELIST[i];
 		    }
 	    } else {
@@ -119,6 +127,8 @@ BEGIN {
 			CMD=" ip -4 -o a s 2>/dev/null | awk '{ print $4}' | cut -d '/' -f 1 ";
 		    } else if (( "type ifconfig 2>/dev/null" | getline junk ) > 0) {
 			CMD=" ifconfig -a | awk 'sub(/inet addr:/,\"\"){print $1}' ";
+		    } else if (( "file /sbin/ifconfig 2>/dev/null" | getline junk ) > 0) {
+			CMD=" /sbin/ifconfig -a | awk 'sub(/inet addr:/,\"\"){print $1}' ";
 		    } else {
 			print "\n  Neither ip nor ifconfig found!\n  Please provide relevant IP-adresses with parameter '-v IPwhitelist=[...]'\n" > "/dev/stderr";
 			if (! ( DEBUG != 0 || DEBUG != "" ))
@@ -139,7 +149,7 @@ BEGIN {
 
 	# 
 	if ( L4Protocols != "" ) {
-		if ( L4Protocols ~ /,/ )
+		if ( L4Protocols ~ SUBSEP )
 			split( L4Protocols, L4PROTOCOLS, SUBSEP );
 		    else
 			split( L4Protocols, L4PROTOCOLS );
@@ -159,31 +169,30 @@ BEGIN {
 	    }
 
 	#
-	if ( L4Ports != "" ) {
+	if ( Services != "" ) {
 		# manually provide list of listening l4proto/ports
 		# e.g. to process remotely gathered data
-		if ( L4Protocols ~ /,/ )
-			split( L4Ports, L4PORTS, SUBSEP );
+		if ( Services ~ SUBSEP )
+			split( Services, SERVICES, SUBSEP );
 		    else
-			split( L4Ports, L4PORTS );
+			split( Services, SERVICES );
 
 		# transponate values to indices for easier searching
-		for ( i in L4PORTS ) {
-			L4PORTS[L4PORTS[i]]=i;
-			delete L4PORTS[i];
+		for ( i in SERVICES ) {
+			SERVICES[SERVICES[i]]="!";
+			delete SERVICES[i];
 		    }
 	    } else {
-		CMD=" netstat -tulpen 2>/dev/null ";
+		CMD=" netstat -tulpn 2>/dev/null ";
 		while (( CMD | getline i) > 0) {
-			if ( substr( i, 1, 3) in L4PROTOCOLS ) {
-				port = i;
-				sub( /^.[^ ]+[ ]+[^ ]+[ ]+[^ ]+[ ]+/, "", port );
-				sub( /[ ].*$/, "", port );
+			gsub( /[ ]+/, SUBSEP, i );
+			lastColumn=split( i, Service, SUBSEP );
+			if ( Service[1] in L4PROTOCOLS ) {
+				port = Service[4];
 				sub( /^.*[.:]/, "", port );
-				daemon = i;
-				sub( /^.*[-\/]/, "", daemon );
-				sub( /[ ].*$/, "", daemon );
-				L4PORTS[ substr( i, 1, 3) "/" port ] = ( daemon != "" ? daemon : "-" );
+				daemon = Service[ lastColumn -1 ];
+				sub( /[0-9]*\//, "", daemon );
+				SERVICES[ substr( Service[1], 1, 3 ) "/" port ] = ( daemon != "" ? daemon : "-" );
 			    }
 		    }
 		close( CMD );
@@ -247,46 +256,82 @@ BEGIN {
 
 
 	# normalize Line wether /proc/net/ip_conntrack or /proc/net/nf_conntrack was read
-	if ( LINE[1] in L4PROTOCOLS ) {
-		LINE[0]="l3proto=ipv4";
-		delete LINE[2];
-		LINE[1]="l4proto=" LINE[1];
-		LINE[3]="persistence=" LINE[3];
-	    } else if ( LINE[3] in L4PROTOCOLS ) {
-		LINE[1]="l3proto=" LINE[1];
-		delete LINE[2];
-		delete LINE[4];
-		LINE[3]="l4proto=" LINE[3];
-		LINE[5]="persistence=" LINE[5];
+	if ( LINE[1] ~ /^ipv[46]$/ && LINE[3] in L4PROTOCOLS ) {
+
+		# looks like nf_conntrack
+		CONNTRACK[ "l3proto" ] = LINE[1];
+		CONNTRACK[ "l4proto" ] = LINE[3];
+		CONNTRACK[ "persistence" ] = LINE[5];
+
+		for ( i=6; i<=12; i++ ) {
+			if ( LINE[i] ~ /=/ ) {
+				split(LINE[i],ENTRY,"=");
+				if (! ( ENTRY[1] in CONNTRACK ))
+					CONNTRACK[ENTRY[1]]=ENTRY[2]
+				if ( ENTRY[1] == "dport" )
+					break;
+			    }
+		    }
+
+	    } else if ( LINE[5] ~ /=/ &&  LINE[6] ~ /=/ && LINE[1] in L4PROTOCOLS ) {
+
+		# looks like ip_conntrack
+		CONNTRACK[ "l3proto" ] = "ipv4";
+		CONNTRACK[ "l4proto" ] = LINE[1];
+		CONNTRACK[ "persistence" ] = LINE[3];
+
+		for ( i=4; i<=10; i++ ) {
+			if ( LINE[i] !~ /=/ )
+				continue;
+			    else {
+				split(LINE[i],ENTRY,"=");
+				if (! ( ENTRY[1] in CONNTRACK ))
+					CONNTRACK[ENTRY[1]]=ENTRY[2]
+				if ( ENTRY[1] == "dport" )
+					break;
+			    }
+		    }
+
+	    } else if ( LINE[4] ~ /:/ && LINE[5] ~ /:/ && LINE[1] in L4PROTOCOLS ) {
+
+			# looks like Linux-netstat
+			if ( LINE[1] !~ /6$/ )
+				CONNTRACK[ "l3proto" ] = "ipv4";
+			    else
+				CONNTRACK[ "l3proto" ] = "ipv6";
+			CONNTRACK[ "l4proto" ] = substr( LINE[1], 1, 3);
+
+			CONNTRACK[ "localIP" ] = LINE[4];
+			sub( /[.:][0-9]+$/, "", CONNTRACK[ "localIP" ] );
+			sub( /.*:/, "", CONNTRACK[ "localIP" ] );
+			CONNTRACK["src"] = CONNTRACK["localIP"];
+
+			CONNTRACK[ "localPort" ] = LINE[4];
+			sub( /^.*[.:]/, "", CONNTRACK[ "localPort" ] );
+			CONNTRACK["sport"] = CONNTRACK["localPort"];
+
+			CONNTRACK[ "remoteIP" ] = LINE[5];
+			sub( /[.:][0-9]+$/, "", CONNTRACK[ "remoteIP" ] );
+			sub( /^.*:/, "", CONNTRACK[ "remoteIP" ] );
+			CONNTRACK["dst"] = CONNTRACK["remoteIP"];
+
+			CONNTRACK[ "remotePort" ] = LINE[5];
+			sub( /^.*[.:]/, "", CONNTRACK[ "remotePort" ] );
+			CONNTRACK["dport"] = CONNTRACK["remotePort"];
+
+			if ( LINE[6]=="ESTABLISHED" )
+				CONNTRACK[ "persistence" ] = 61;
+			    else
+				CONNTRACK[ "persistence" ] = 59;
+
 	    } else if ( DEBUG != 0 || DEBUG != "" ) {
 		printf("%s \n", $0)
 		next;
 	    } else
 		next;
 
-
-	# transponate values to indices for easier searching
-	for (i in LINE) {
-		if ( i==2 || i==4 )
-			continue;
-		if ( LINE[i] ~ /=/ ) {
-			split(LINE[i],ENTRY,"=");
-			if (! ( ENTRY[1] in CONNTRACK ))
-				CONNTRACK[ENTRY[1]]=ENTRY[2]
-		    } else
-			CONNTRACK[LINE[i]]=i;
-		delete LINE[i];
-	    }
-
-
-	# clean superfluus data
-	delete CONNTRACK["mark"];
-	delete CONNTRACK["secmark"];
-	delete CONNTRACK["use"];
-
-
 	# map localIP and remoteIP site
-	if ( ( CONNTRACK["src"] in IPWHITELIST ) && ( CONNTRACK["dst"] in IPWHITELIST ) ) {
+	if ( ( CONNTRACK["src"] in IPWHITELIST && CONNTRACK["dst"] in IPWHITELIST ) ) {
 		CONNTRACK["direction"] = "local";
 	    } else if ( CONNTRACK["src"] in IPWHITELIST ) {
 		CONNTRACK["localIP"] = CONNTRACK["src"];
@@ -298,8 +343,9 @@ BEGIN {
 		CONNTRACK["localPort"] = CONNTRACK["dport"];
 		CONNTRACK["remoteIP"] = CONNTRACK["src"];
 		CONNTRACK["remotePort"] = CONNTRACK["sport"];
-	    } else {
-		# Both IPs are foreign or blacklisted
+	    } else if (! ( "localIP" in CONNTRACK )) {
+		# either both IPs are foreign or blacklisted
+		# or some string got shortened
 		CONNTRACK["direction"] = "foreign";
 	    }
 
@@ -308,7 +354,7 @@ BEGIN {
 	if ( CONNTRACK["direction"] == "foreign" ) {
 		# FixMe: do something
 	    } else if ( CONNTRACK["direction"] == "local" ) {
-		if ( CONNTRACK["l4proto"] "/" CONNTRACK["sport"] in L4PORTS ) {
+		if ( CONNTRACK["l4proto"] "/" CONNTRACK["sport"] in SERVICES ) {
 			CONNTRACK["remotePort"] = CONNTRACK["sport"];
 		    } else {
 			CONNTRACK["remotePort"] = CONNTRACK["dport"];
@@ -319,7 +365,7 @@ BEGIN {
 		CONNTRACK["server"] = "localhost";
 		CONNTRACK["service"] = CONNTRACK["l4proto"] "/" CONNTRACK["remotePort"];
 		CONNTRACK["localPort"] = 0;
-	    } else if (! ( CONNTRACK["l4proto"] "/" CONNTRACK["localPort"] in L4PORTS )) {
+	    } else if (! ( CONNTRACK["l4proto"] "/" CONNTRACK["localPort"] in SERVICES )) {
 		CONNTRACK["direction"] = "outgoing";
 		CONNTRACK["client"] = CONNTRACK["localIP"];
 		CONNTRACK["server"] = CONNTRACK["remoteIP"];
@@ -330,7 +376,7 @@ BEGIN {
 		CONNTRACK["client"] = CONNTRACK["localIP"];
 		CONNTRACK["server"] = CONNTRACK["remoteIP"];
 		CONNTRACK["service"] = CONNTRACK["l4proto"] "/" CONNTRACK["remotePort"];
-	    } else if ( CONNTRACK["l4proto"] "/" CONNTRACK["localPort"] in L4PORTS ) {
+	    } else if ( CONNTRACK["l4proto"] "/" CONNTRACK["localPort"] in SERVICES ) {
 		CONNTRACK["direction"] = "incoming";
 		CONNTRACK["client"] = CONNTRACK["remoteIP"];
 		CONNTRACK["server"] = CONNTRACK["localIP"];
@@ -345,10 +391,16 @@ BEGIN {
 		next;
 
 	CONNTRACK[ "hostname" ] = HOSTNAME;
-	CONNTRACK[ "daemon" ] = ( CONNTRACK["service"] in L4PORTS ? L4PORTS[ CONNTRACK["service"] ] : ">" );
+	if ( CONNTRACK["direction"] == "outgoing" )
+		CONNTRACK[ "daemon" ] = ">";
+	    else if ( CONNTRACK["service"] in SERVICES )
+		CONNTRACK[ "daemon" ] = SERVICES[ CONNTRACK["service"] ];
+	    else
+		CONNTRACK[ "daemon" ] = "?";
 
-	if (! ( CONNTRACK["direction"] == "local" || CONNTRACK["direction"] == "foreign" || \
-	    CONNTRACK["localPort"] in PORTBLACKLIST || CONNTRACK["remotePort"] in PORTBLACKLIST ) ) {
+	if (! ( CONNTRACK["direction"] == "local"	|| CONNTRACK["direction"] == "foreign"		|| \
+	    CONNTRACK["localPort"] in PORTBLACKLIST	|| CONNTRACK["remotePort"] in PORTBLACKLIST	|| \
+	    CONNTRACK["localIP"] in IPBLACKLIST		|| CONNTRACK["remoteIP"] in IPBLACKLIST ) ) {
 		CONNINDEX=CONNTRACK[ OUTPUTFORMAT[1] ];
 		for ( i=2; OUTPUTFORMAT[ i+1 ] != ""; i++ )
 			CONNINDEX = CONNINDEX SUBSEP CONNTRACK[ OUTPUTFORMAT[i]];
