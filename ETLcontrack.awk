@@ -73,11 +73,11 @@
 BEGIN{
 	SUBSEP = ",";
 	# print ERROR > /dev/stderr" is not portable for HP-UX!
-	if ( LOGFILE == "" && ( "find /dev/stderr" | getline i ) > 0 )
+	if ( LOGFILE == "" && ( "find /dev/stderr 2>/dev/null" | getline i ) > 0 )
 		LOGFILE = "/dev/stderr";
 	    else if ( LOGFILE == "" )
 		LOGFILE = "/dev/tty";
-	close( "find /dev/stderr" );
+	close( "find /dev/stderr 2>/dev/null" );
 
 	# Define fields in Output and StateFile
 	if ( OutputFormat != "" ) {
@@ -102,6 +102,7 @@ BEGIN{
 				srand( SEED % 32767 );
 				system( "sleep " int( 1 + rand() * 4 ) );
 			    }
+			close( "echo $$" );
 		    }
 
 		while (( getline CONNECTION < STATEFILE ) > 0 )
@@ -122,11 +123,11 @@ BEGIN{
 			printf( "\n" ) > LOGFILE;
 		    }
 	    } else {
-		if ( ( "find /dev/stdout" | getline i ) > 0 )
+		if ( ( "find /dev/stdout 2>/dev/null" | getline i ) > 0 )
 			STATEFILE = "/dev/stdout";
 		    else
 			STATEFILE = "/dev/tty";
-		close( "find /dev/stdout" );
+		close( "find /dev/stdout 2>/dev/null" );
 	    }
 
 	# blacklist local or remote IPs
@@ -243,7 +244,7 @@ BEGIN{
 					print i > LOGFILE;
 				printf( "\n" ) > LOGFILE;
 			    }
-		    } else if ( OS == "HP-UX" || OS == "AIX" || OS == "SunOS" ) {
+		    } else if ( OS == "AIX" || OS == "HP-UX" || OS == "SunOS" ) {
 			if (( "find /usr/bin/netstat 2>/dev/null" | getline NETSTAT ) > 0) {
 				#$ netstat -ni
 				#Name      Mtu  Network	 Address	 Ipkts	      Ierrs Opkts	      Oerrs Coll
@@ -252,7 +253,7 @@ BEGIN{
 
 				CMD = NETSTAT " -ni | awk '{ if ( $1 ~ /[0-9]$/ ) print $4;}'"
 				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-					print "Command to figure out IPs: " NETSTAT;
+					print "Command to figure out IPs: " NETSTAT > LOGFILE;
 				    }
 			    } else {
 				print "ERROR: netstat not found!\n   Please provide relevant IP-addresses with parameter '-v IPlist=[...]'\n" > LOGFILE;
@@ -291,8 +292,10 @@ BEGIN{
 #		# FixMe: autogenerate List from /proc/net/protocols
 	    } else {
 		++L4PROTOCOLS[ "tcp" ];
+		++L4PROTOCOLS[ "tcp4" ];
 		++L4PROTOCOLS[ "tcp6" ];
 		++L4PROTOCOLS[ "udp" ];
+		++L4PROTOCOLS[ "udp4" ];
 		++L4PROTOCOLS[ "udp6" ];
 	    }
 
@@ -320,25 +323,33 @@ BEGIN{
 
 			if ( ( getline i < "/proc/sys/net/ipv4/ip_local_port_range" ) > 0 )
 				split( i, Portrange );
+                        close( "/proc/sys/net/ipv4/ip_local_port_range" );
 
 			while (( CMD | getline i) > 0) {
 
-				gsub( /[ ]+/, SUBSEP, i );
-				lastColumn = split( i, Service, SUBSEP );
+				lastColumn = split( i, Service );
+				if ( !( Service[ 1 ] in L4PROTOCOLS ) )
+					continue;
 
 				port = Service[ 4 ];
 				sub( /^.*[.:]/, "", port );
 
-				if ( index( Service[ lastColumn ], "/" ) )
-					daemon = Service[ lastColumn ];
-				    else if ( index( Service[ lastColumn -1 ], "/" ) )
-					daemon = Service[ lastColumn -1 ];
-				    else
+				if ( Service[ 1 ] ~ /^tcp/ && Service[ 7 ] ~ /\// ) {
+					daemon = Service[ 7 ];
+					sub( /[0-9]*\//, "", daemon );
+					if ( daemon ~ /^[0-9]$/ )
+						continue;
+					sub( /:.*/, "", daemon );
+				    } else if ( Service[ 1 ] ~ /^udp/ && Service[ 6 ] ~ /\// ) {
+					daemon = Service[ 6 ];
+					sub( /[0-9]*\//, "", daemon );
+					sub( /:.*/, "", daemon );
+				    } else
 					daemon = "-";
-				sub( /[0-9]*\//, "", daemon );
 
-				if ( Service[ 1 ] in L4PROTOCOLS && !( port >= Portrange[ 1 ] && port <= Portrange[ 2 ] ) ) {
-					SERVICES[ substr( Service[ 1 ], 1, 3 ) "/" port ] = daemon;
+				if ( !( port >= Portrange[ 1 ] && port <= Portrange[ 2 ] ) ) {
+					sub( /[46]$/, Service[ 1 ] );
+					SERVICES[ Service[ 1 ] "/" port ] = daemon;
 				    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 					print i > LOGFILE;
 				    }
@@ -353,7 +364,7 @@ BEGIN{
 			    }
 			while (( CMD | getline i ) > 0)
 				if ( tolower( i ) ~ /^listen/ && tolower( i ) !~ /^listen 127.0.0.1/ ) {
-					sub( /^.*\./, "", i );
+					sub( /^.*[.]/, "", i );
 					SERVICES[ "tcp/" i ] = ( daemon != "" ? daemon : "-" );
 				    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 #					print i > LOGFILE;
@@ -366,36 +377,38 @@ BEGIN{
 			    }
 			while (( CMD | getline i ) > 0)
 				if ( tolower( i ) ~ /^idle/ && tolower( i ) !~ /^idle 127.0.0.1/ ) {
-					sub( /^.*\./, "", i );
-					SERVICES[ "udp/" substr( i, index( i, "." ) +1 ) ] = ( daemon != "" ? daemon : "-" );
+					sub( /^.*[.]/, "", i );
+					SERVICES[ "udp/" i ] = ( daemon != "" ? daemon : "-" );
 				    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 #					print i > LOGFILE;
 				    }
 			close( CMD );
 
-		    } else if ( OS == "HP-UX" ) {
+		    } else if ( OS == "HP-UX" || OS == "AIX" ) {
 			CMD = "netstat -an -f inet 2>/dev/null | grep -v 'ESTABLISHED'";
 			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 				print "Command to figure out services: " CMD > LOGFILE;
 			    }
 			while (( CMD | getline i) > 0) {
 
-				gsub( /[ ]+/, SUBSEP, i );
-				lastColumn = split( i, Service, SUBSEP );
+				lastColumn = split( i, Service );
 
 				if ( Service[ 1 ] in L4PROTOCOLS && tolower( Service[ lastColumn ] ) == "listen") {
 					port = Service[ 4 ];
 					sub( /^.*[.:]/, "", port );
 					SERVICES[ substr( Service[ 1 ], 1, 3 ) "/" port ] = "-";
 
-				    } else if ( Service[ 1 ] == "udp" && Service[ 5 ] == "*.*" &&	\
-						( Service[ 4 ] ~ /[*][.][0-9]+/ || Service[ 4 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[:.][0-9]+/ ) ) {
+				    } else if ( Service[ 1 ] ~ /^udp/ && Service[ 5 ] == "*.*" &&	\
+						( Service[ 4 ] ~ /[*][.:][0-9]+/ || Service[ 4 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[.:][0-9]+/ ) ) {
 					port = Service[ 4 ];
 					sub( /^.*[.:]/, "", port );
-					SERVICES[ substr( Service[ 1 ], 1, 3 ) "/" port ] = "-";
+
+					sub( /[46]$/, Service[ 1 ] );
+
+					SERVICES[ Service[ 1 ] "/" port ] = ( daemon != "" ? daemon : "-" );
 
 				    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-					print i > LOGFILE;
+#					print i > LOGFILE;
 				    }
 			    }
 			close( CMD );
@@ -404,7 +417,7 @@ BEGIN{
 		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 			print CMD > LOGFILE;
 			for ( i in SERVICES )
-				print i > LOGFILE;
+				printf("%s: \t%s\n", i, SERVICES[ i ] ) > LOGFILE;
 			printf( "\n" ) > LOGFILE;
 		    }
 	    }
@@ -556,11 +569,15 @@ BEGIN{
 
 
 	    } else if ( OS == "Linux" && LINE[ 1 ] ~ /^ipv[46]$/ && LINE[ 3 ] in L4PROTOCOLS ) {
-		# normalize Line wether /proc/net/nf_conntrack or /proc/net/ip_conntrack was read
+
+		if ( tolower( $0 ) ~ /unreplied/ )
+			next;
 
 		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 			++WARNINGS[ "Apparently nf_conntrack..." ];
 		    }
+
+		# normalize Line wether /proc/net/nf_conntrack or /proc/net/ip_conntrack was read
 		CONNTRACK[ "l3proto" ] = LINE[ 1 ];
 		CONNTRACK[ "l4proto" ] = LINE[ 3 ];
 		CONNTRACK[ "persistence" ] = LINE[ 5 ];
@@ -577,9 +594,13 @@ BEGIN{
 
 	    } else if ( OS == "Linux" && LINE[ 5 ] ~ /\=/ &&  LINE[ 6 ] ~ /\=/ && LINE[ 1 ] in L4PROTOCOLS ) {
 
+		if ( tolower( $0 ) ~ /unreplied/ )
+			next;
+
 		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 			++WARNINGS[ "Apparently ip_conntrack..." ];
 		    }
+		# normalize Line wether /proc/net/nf_conntrack or /proc/net/ip_conntrack was read
 		CONNTRACK[ "l3proto" ] = "ipv4";
 		CONNTRACK[ "l4proto" ] = LINE[ 1 ];
 		CONNTRACK[ "persistence" ] = LINE[ 3 ];
@@ -712,7 +733,7 @@ BEGIN{
 		CONNTRACK[ "server" ] = "localhost";
 		CONNTRACK[ "service" ] = CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "remotePort" ];
 		CONNTRACK[ "localPort" ] = 0;
-	    } else if ( ( CONNTRACK[ "remotePort" ] < 2**10 && CONNTRACK[ "localPort" ] > CONNTRACK[ "remotePort" ] ) ||	\
+	    } else if ( ( CONNTRACK[ "remotePort" ] < 2**10 && CONNTRACK[ "localPort" ] > ( Portrange[ 1 ] > 0 ? Portrange[ 1 ] : CONNTRACK[ "remotePort" ] ) ) ||	\
 		    ! ( CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "localPort" ] in SERVICES )) {
 		CONNTRACK[ "direction" ] = "outgoing";
 		CONNTRACK[ "client" ] = CONNTRACK[ "localIP" ];
@@ -796,7 +817,7 @@ END{
 	close( LOGFILE );
 
 	if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 )
-		system("ps -o ppid= -p $$ | xargs lsof -p >> " LOGFILE );
+		system("ps -o ppid= -p $$ 2>/dev/null | xargs lsof -p 2>/dev/null >>" LOGFILE );
 
 #	# FixMe: print help if sensible
 #	if ( ARGC < 2 && NR < 1 )
