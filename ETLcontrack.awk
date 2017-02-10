@@ -13,14 +13,14 @@
 #	netstat -tune --wide	| awk -f ETLconntrack.awk
 # 
 # on SunOS:
-#	netstat -n -f inet -f inet6 | /usr/local/bin/gawk -f ETLconntrack.awk
-#   or
 #	netstat -n -f inet -f inet6 | /usr/xpg4/bin/awk -f ETLconntrack.awk
+#   or
+#	netstat -n -f inet -f inet6 | /usr/local/bin/gawk -f ETLconntrack.awk
 #   or on ancient versions like Solaris v8:
 #	( netstat -n -f inet; netstat -n -f inet6 ) |	\
 #	> /usr/xpg4/bin/awk -f ETLconntrack.awk
 # 
-# on HP-UX:
+# on AIX or HP-UX:
 #	netstat -an -f inet | awk -f ETLconntrack.awk
 # 
 # 
@@ -42,10 +42,11 @@
 # 
 # parameters usable for development and debugging
 # -v DEBUG=1
+# -v NOSLEEP=1
 # -v LOGFILE=$PATH/$FILE.log
 # 
 # 
-# v2.97 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
+# v2.98 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -69,6 +70,15 @@
 # 
 # feel free to ask for further customization
 # 
+
+function IPhex( IP,     quad ){
+	split( IP, quad, "[/.]" );
+	return sprintf( "%#010x", quad[ 1 ] * 2^24 + quad[ 2 ] * 2^16 + quad[ 3 ] * 2^8 + quad[ 4 ]);
+    }
+function replace( SEARCH, REPLACEMENT, TARGET ){
+	gsub( SEARCH, REPLACEMENT, TARGET );
+	return TARGET;
+    }
 
 BEGIN{
 	SUBSEP = ",";
@@ -97,7 +107,7 @@ BEGIN{
 
 		# sleep for up to four seconds to distribute load on virtual systems
 		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-		    } else {
+		    } else if ( !( NOSLEEP != "" && NOSLEEP != "0" && NOSLEEP != 0 ) ) {
 			if (( "echo $$" | getline SEED ) > 0 && SEED > 0 ) {
 				srand( SEED % 32767 );
 				system( "sleep " int( 1 + rand() * 4 ) );
@@ -113,7 +123,7 @@ BEGIN{
 					CONNINDEX = CONNINDEX SUBSEP LINE[i];
 				COUNTER = LINE[i];
 				# cap maxcount at some arbitrary number as e.g. 1440
-				SAVEDCONNECTIONS[ CONNINDEX ] = ( COUNTER > 24*60 ? 24*60 : COUNTER );
+				SAVEDCONNECTIONS[ CONNINDEX ] = ( int( COUNTER ) > 24*60 ? 24*60 : COUNTER );
 				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 					printf( "%s = %s\n", CONNINDEX, SAVEDCONNECTIONS[ CONNINDEX ] ) > LOGFILE;
 				    }
@@ -168,8 +178,9 @@ BEGIN{
 
 	# 
 	if ( HOSTNAME == "" || HOSTNAME == "localhost" ) {
-		if (( "uname -n" | getline HOSTNAME ) > 0 && HOSTNAME == "localhost" ) {
-			print "ERROR: Hostname unknown!\n   Please provide Hostname with parameter '-v HOSTNAME=[...]'\n" > LOGFILE;
+		if ( ( "uname -n" | getline HOSTNAME ) > 0 &&	\
+		    ( HOSTNAME == "localhost" || tolower( HOSTNAME ) ~ /^[^a-z0-9]/ ) ) {
+			print "ERROR: Hostname unknown or apparently illegal!\n   Please provide Hostname with parameter '-v HOSTNAME=[...]'\n" > LOGFILE;
 			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 			    } else
 				exit ERROR = 1;
@@ -213,7 +224,7 @@ BEGIN{
 			if (( "type ip 2>/dev/null" | getline Path2IP ) > 0) {
 				CMD = "ip -4 -o a s 2>/dev/null | awk '{ print $4 }' | cut -d '/' -f 1 ";
 				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-					print "Command to figure out IPs: " Path2IP > LOGFILE;
+					print "Command to figure out IPs: " CMD > LOGFILE;
 				    }
 			    } else if (( "find /sbin/ifconfig 2>/dev/null" | getline Path2IP ) > 0) {
 				# $ /sbin/ifconfig -a
@@ -223,7 +234,7 @@ BEGIN{
 
 				CMD = "/sbin/ifconfig -a | awk '{ if ( $1 ~ /^inet$/ ) { if ( $2 ~ /:/ ) print substr( $2, index( $2, \":\" ) +1 ); else print $2; }}'"
 				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-					print "Command to figure out IPs: " Path2IP > LOGFILE;
+					print "Command to figure out IPs: " CMD > LOGFILE;
 				    }
 			    } else {
 				print "ERROR: Neither ip nor ifconfig found!\n   Please provide relevant IP-addresses with parameter '-v IPlist=[...]'\n" > LOGFILE;
@@ -234,20 +245,20 @@ BEGIN{
 			close( "type ip 2>/dev/null" );
 			close( "find /sbin/ifconfig 2>/dev/null" );
 
-			while ( ( CMD | getline i ) > 0 && Path2IP != "" )
+			while ( ( CMD | getline i ) > 0 )
 				++localIPs[i];
 			close( CMD );
 
 		    } else if ( OS == "AIX" || OS == "HP-UX" || OS == "SunOS" ) {
-			if (( "find /usr/bin/netstat 2>/dev/null" | getline NETSTAT ) > 0) {
+			if (( "type netstat 2>/dev/null" | getline NETSTAT ) > 0) {
 				#$ netstat -ni
 				#Name      Mtu  Network	 Address	 Ipkts	      Ierrs Opkts	      Oerrs Coll
 				#lan1:1    1500 10.91.176.0     10.91.176.156   1366	       0     0		  0     0
 				#lan1      1500 10.91.176.0     10.91.176.153   3487569	    0     3693219	    0     0
 
-				CMD = NETSTAT " -ni | awk '{ if ( $1 ~ /[0-9]$/ ) print $4;}'"
+				CMD = "netstat -ni | awk '{ if ( $1 ~ /[0-9]$/ ) print $4;}'"
 				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-					print "Command to figure out IPs: " NETSTAT > LOGFILE;
+					print "Command to figure out IPs: " CMD > LOGFILE;
 				    }
 			    } else {
 				print "ERROR: netstat not found!\n   Please provide relevant IP-addresses with parameter '-v IPlist=[...]'\n" > LOGFILE;
@@ -255,9 +266,9 @@ BEGIN{
 				    } else
 					exit ERROR = 1;
 			    }
-			close( "find /usr/bin/netstat 2>/dev/null" );
+			close( "type netstat 2>/dev/null" );
 
-			while ( ( CMD | getline i ) > 0 && NETSTAT != "" )
+			while ( ( CMD | getline i ) > 0 )
 				++localIPs[i];
 			close( CMD );
 		    }
@@ -308,115 +319,84 @@ BEGIN{
 	    } else {
 
 		if ( OS == "Linux" ) {
-			CMD = "netstat -tulpn 2>/dev/null";
-			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-				print "Command to figure out services: " CMD > LOGFILE;
-			    }
-
 			if ( ( getline i < "/proc/sys/net/ipv4/ip_local_port_range" ) > 0 )
 				split( i, Portrange );
                         close( "/proc/sys/net/ipv4/ip_local_port_range" );
 
+			CMD = "netstat -tulpn 2>/dev/null";
 			while (( CMD | getline i) > 0) {
+				if ( i ~ /^tcp/ || i ~ /^udp/ ) {
+					lastColumn = split( i, Service );
+					port = replace( "^.*[.:]", "", Service[ 4 ] );
 
-				split( i, Service );
-				if ( !( Service[ 1 ] in L4PROTOCOLS ) ) {
-					if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-						print "Unrecognized layer4-protocol: " i > LOGFILE;
+					if ( i ~ /\// ) {
+						daemon = replace( "^.*/", "", i );
+						sub( / *$/, "", daemon );
+						if ( daemon ~ /^[0-9]$/ ) {
+							if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+								print "Daemon named as a digit: " i > LOGFILE;
+							    }
+							continue;
+						    } else
+							sub( /:.*$/, "", daemon );
+
+					    } else
+						daemon = "-";
+
+					SERVICES[ replace( "[46]$", "", Service[ 1 ] ) "/" port ] = daemon;
+
+					# explicit casting as integer via int() to avoid string-comparison
+					if ( int( port ) >= ( int( Portrange[ 1 ] ) > 0 ? int( Portrange[ 1 ] ) : 32768 ) &&	\
+					    int( port ) <= ( int( Portrange[ 2 ] ) > 0 ? int( Portrange[ 2 ] ) : 65536 ) ) {
+						if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 )
+							print "Service on a high port (" port ">" ( int( Portrange[ 1 ] ) > 0 ? int( Portrange[ 1 ] ) : 32768 ) "): " i > LOGFILE;
 					    }
-					continue;
-				    }
-
-				port_str = Service[ 4 ];
-				sub( /^.*[.:]/, "", port_str );
-				port = int( port_str );
-
-				if ( Service[ 1 ] ~ /^tcp/ && Service[ 7 ] ~ /\// ) {
-					daemon = Service[ 7 ];
-					sub( /[0-9]*\//, "", daemon );
-					if ( daemon ~ /^[0-9]$/ ) {
-						if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-							print "Daemon named as a digit: " i > LOGFILE;
-						    }
-						continue;
-					    }
-					sub( /:.*/, "", daemon );
-				    } else if ( Service[ 1 ] ~ /^udp/ && Service[ 6 ] ~ /\// ) {
-					daemon = Service[ 6 ];
-					sub( /[0-9]*\//, "", daemon );
-					sub( /:.*/, "", daemon );
-				    } else
-					daemon = "-";
-
-				sub( /[46]$/, "", Service[ 1 ] );
-				SERVICES[ Service[ 1 ] "/" port ] = daemon;
-				if ( port >= Portrange[ 1 ] && port <= Portrange[ 2 ] ) {
-					if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 )
-						print "Service on a high port (" port ">" Portrange[ 1 ] "): " i > LOGFILE;
 				    }
 			    }
 			close( CMD );
+
 
 		    } else if ( OS == "SunOS" ) {
 			# combined command "netstat -f inet -f inet6 -P ..." is not supported by Solaris < v10
-			CMD = "netstat -f inet -P tcp -an 2>/dev/null | awk '{ print $NF,$1;}'; netstat -f inet6 -P tcp -an 2>/dev/null | awk '{ print $NF,$1;}'"
-			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-				print "Command to figure out services: " CMD > LOGFILE;
-			    }
+			CMD = "netstat -f inet -P tcp -an 2>/dev/null; netstat -f inet6 -P tcp -an 2>/dev/null"
 			while (( CMD | getline i ) > 0)
-				if ( tolower( i ) ~ /^listen/ && tolower( i ) !~ /^listen 127.0.0.1/ ) {
-					sub( /^.*[.]/, "", i );
-					SERVICES[ "tcp/" i ] = ( daemon != "" ? daemon : "-" );
-				    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-#					print i > LOGFILE;
+				if ( i ~ /LISTEN/ ) {
+					lastColumn = split( i, Service );
+					port = replace( "^.*[.:]", "", Service[ 1 ] );
+					SERVICES[ "tcp/" port ] = ( daemon != "" ? daemon : "-" );
 				    }
 			close( CMD );
 
-			CMD = "netstat -f inet -P udp -an 2>/dev/null | awk '{ print $NF,$1;}'; netstat -f inet6 -P udp -an 2>/dev/null | awk '{ print $NF,$1;}'"
-			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-				print "Command to figure out services: " CMD > LOGFILE;
-			    }
+			CMD = "netstat -f inet -P udp -an 2>/dev/null; netstat -f inet6 -P udp -an 2>/dev/null"
 			while (( CMD | getline i ) > 0)
-				if ( tolower( i ) ~ /^idle/ && tolower( i ) !~ /^idle 127.0.0.1/ ) {
-					sub( /^.*[.]/, "", i );
-					SERVICES[ "udp/" i ] = ( daemon != "" ? daemon : "-" );
-				    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-#					print i > LOGFILE;
+				if ( i ~ /IDLE/ ) {
+					lastColumn = split( i, Service );
+					port = replace( "^.*[.:]", "", Service[ 1 ] );
+					SERVICES[ "udp/" port ] = ( daemon != "" ? daemon : "-" );
 				    }
 			close( CMD );
 
 		    } else if ( OS == "AIX" || OS == "HP-UX" ) {
-			CMD = "netstat -an -f inet 2>/dev/null | grep -v 'ESTABLISHED'";
-			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-				print "Command to figure out services: " CMD > LOGFILE;
-			    }
+			CMD = "netstat -an -f inet 2>/dev/null; netstat -an -f inet6 2>/dev/null";
 			while (( CMD | getline i) > 0) {
+				if ( i ~ /^tcp/ || i ~ /^udp/ ) {
+					lastColumn = split( i, Service );
+					if ( Service[ 1 ] ~ /^tcp/ && tolower( Service[ lastColumn ] ) == "listen") {
+						port = replace( "^.*[.:]", "", Service[ 4 ] );
+						SERVICES[ replace( "[46]$", "", Service[ 1 ] ) "/" port ] = ( daemon != "" ? daemon : "-" );
 
-				lastColumn = split( i, Service );
-
-				if ( Service[ 1 ] in L4PROTOCOLS && tolower( Service[ lastColumn ] ) == "listen") {
-					port = Service[ 4 ];
-					sub( /^.*[.:]/, "", port );
-					SERVICES[ substr( Service[ 1 ], 1, 3 ) "/" port ] = "-";
-
-				    } else if ( Service[ 1 ] ~ /^udp/ && Service[ 5 ] == "*.*" &&	\
-						( Service[ 4 ] ~ /[*][.:][0-9]+/ || Service[ 4 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[.:][0-9]+/ ) ) {
-					port = Service[ 4 ];
-					sub( /^.*[.:]/, "", port );
-
-					sub( /[46]$/, "", Service[ 1 ] );
-
-					SERVICES[ Service[ 1 ] "/" port ] = ( daemon != "" ? daemon : "-" );
-
-				    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-#					print i > LOGFILE;
+					    } else if ( Service[ 1 ] ~ /^udp/ && Service[ 5 ] == "*.*" ) {
+#						&& ( Service[ 4 ] ~ /[*][.:][0-9]+/ || Service[ 4 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[.:][0-9]+/ ) ) 
+						port = replace( "^.*[.:]", "", Service[ 4 ] );
+						SERVICES[ replace( "[46]$", "", Service[ 1 ] ) "/" port ] = ( daemon != "" ? daemon : "-" );
+					    }
 				    }
 			    }
 			close( CMD );
 		    }
 
 		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-			print CMD > LOGFILE;
+			print "Command to figure out services: " CMD > LOGFILE;
 			for ( i in SERVICES )
 				printf("%s: \t%s\n", i, SERVICES[ i ] ) > LOGFILE;
 			printf( "\n" ) > LOGFILE;
@@ -532,52 +512,16 @@ BEGIN{
 	LINEWIDTH = split( $0, LINE );
 	split( "", CONNTRACK );
 
-	if ( OS == "SunOS" && LINE[ 1 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[:.][0-9]+/ && LINE[ 2 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[:.][0-9]+/ && LINE[ 3 ] ~ /[0-9]+/ && LINE[ 4 ] ~ /[0-9]+/ && LINE[ 5 ] ~ /[0-9]+/ && LINE[ 6 ] ~ /[0-9]+/ ) {
-		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-			++WARNINGS[ "Apparently output from netstat on Solaris v10." ];
-		    }
-		CONNTRACK[ "l3proto" ] = "ipv4";
-		CONNTRACK[ "l4proto" ] = "tcp";
+	 if ( OS == "Linux" && LINE[ 1 ] ~ /^ipv[46]$/ && LINE[ 3 ] in L4PROTOCOLS ) {
 
-		if ( tolower( LINE[ LINEWIDTH ] ) == "established"  )
-			CONNTRACK[ "persistence" ] = 61;
-		    else
-			CONNTRACK[ "persistence" ] = 59;
-
-		CONNTRACK[ "localPort" ] = LINE[ 1 ];
-		# cleanup "^IP:"
-		sub( /^.*[.:]/, "", CONNTRACK[ "localPort" ] );
-		CONNTRACK[ "sport" ] = int( CONNTRACK[ "localPort" ] );
-
-		CONNTRACK[ "remotePort" ] = LINE[ 2 ];
-		# cleanup "^IP:"
-		sub( /^.*[.:]/, "", CONNTRACK[ "remotePort" ] );
-		CONNTRACK[ "dport" ] = int( CONNTRACK[ "remotePort" ] );
-
-		CONNTRACK[ "remoteIP" ] = LINE[ 2 ];
-		# cleanup ":port$"
-		sub( /[.:][0-9]+$/, "", CONNTRACK[ "remoteIP" ] );
-		CONNTRACK[ "dst" ] = CONNTRACK[ "remoteIP" ];
-
-		CONNTRACK[ "localIP" ] = LINE[ 1 ];
-		# cleanup ":port$"
-		sub( /[.:][0-9]+$/, "", CONNTRACK[ "localIP" ] );
-		CONNTRACK[ "src" ] = CONNTRACK[ "localIP" ];
-
-
-	    } else if ( OS == "Linux" && LINE[ 1 ] ~ /^ipv[46]$/ && LINE[ 3 ] in L4PROTOCOLS ) {
+		++NOTICE[ "Input apparently nf_conntrack on contemporary Linux..." ];
 
 		if ( tolower( $0 ) ~ /unreplied/ )
 			next;
 
-		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-			++WARNINGS[ "Apparently nf_conntrack..." ];
-		    }
-
 		# normalize Line wether /proc/net/nf_conntrack or /proc/net/ip_conntrack was read
 		CONNTRACK[ "l3proto" ] = LINE[ 1 ];
-		CONNTRACK[ "l4proto" ] = LINE[ 3 ];
-		sub( /[46]$/, "", CONNTRACK[ "l4proto" ] );
+		CONNTRACK[ "l4proto" ] = replace( "[46]$", "", LINE[ 3 ] );
 		CONNTRACK[ "persistence" ] = LINE[ 5 ];
 
 		for ( i=6; i<LINEWIDTH; i++ ) {
@@ -594,16 +538,14 @@ BEGIN{
 
 	    } else if ( OS == "Linux" && LINE[ 5 ] ~ /\=/ &&  LINE[ 6 ] ~ /\=/ && LINE[ 1 ] in L4PROTOCOLS ) {
 
+		++NOTICE[ "Input apparently ip_conntrack on outdated Linux..." ];
+
 		if ( tolower( $0 ) ~ /unreplied/ )
 			next;
 
-		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-			++WARNINGS[ "Apparently ip_conntrack..." ];
-		    }
 		# normalize Line wether /proc/net/nf_conntrack or /proc/net/ip_conntrack was read
 		CONNTRACK[ "l3proto" ] = "ipv4";
-		CONNTRACK[ "l4proto" ] = LINE[ 1 ];
-		sub( /[46]$/, "", CONNTRACK[ "l4proto" ] );
+		CONNTRACK[ "l4proto" ] = replace( "[46]$", "", LINE[ 1 ] );
 		CONNTRACK[ "persistence" ] = LINE[ 3 ];
 
 		for ( i=4; i<LINEWIDTH; i++ ) {
@@ -618,115 +560,156 @@ BEGIN{
 			    }
 		    }
 
+	    } else if ( OS == "SunOS" &&	\
+		LINE[ 1 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[:.][0-9]+/ &&	\
+		LINE[ 2 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[:.][0-9]+/ &&	\
+		LINE[ 3 ] ~ /[0-9]+/ && LINE[ 4 ] ~ /[0-9]+/ && LINE[ 5 ] ~ /[0-9]+/ && LINE[ 6 ] ~ /[0-9]+/ ) {
+
+		++NOTICE[ "Input apparently from netstat on Solaris v10." ];
+
+		CONNTRACK[ "l3proto" ] = "ipv4";
+		CONNTRACK[ "l4proto" ] = "tcp";
+
+		if ( tolower( LINE[ LINEWIDTH ] ) == "established"  )
+			CONNTRACK[ "persistence" ] = 61;
+		    else
+			CONNTRACK[ "persistence" ] = 59;
+
+		CONNTRACK[ "sport" ] = replace( "^.*[.:]", "", LINE[ 1 ] );
+		CONNTRACK[ "src" ] = replace( "[.:][0-9]+$", "", LINE[ 1 ] );
+
+		CONNTRACK[ "dport" ] = replace( "^.*[.:]", "", LINE[ 2 ] );
+		CONNTRACK[ "dst" ] = replace( "[.:][0-9]+$", "", LINE[ 2 ] );
+
 	    } else if (	LINE[ 4 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[:.][0-9]+/ &&	\
 			LINE[ 5 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[:.][0-9]+/ &&	\
-			LINE[ 1 ] in L4PROTOCOLS &&	\
-			tolower( LINE[ 6 ] ) !~ /^listen$/ ) {
+			LINE[ 1 ] in L4PROTOCOLS ) {
 		## Linux
-		#$ netstat -tune --notrim | head
+		#$ netstat -tune --notrim || netstat -tune --wide
 		#Active Internet connections (w/o servers)
 		#Proto Recv-Q Send-Q Local Address               Foreign Address             State       User       Inode
 		#tcp        0      0 10.110.7.244:2049           10.110.6.35:606             ESTABLISHED 65534      2915692474
 		# 
 		## HPUX:
-		#$ netstat -an -f inet | grep -v LISTEN | head
+		#$ netstat -an -f inet | grep -v LISTEN
 		#Active Internet connections (including servers)
 		#Proto Recv-Q Send-Q  Local Address          Foreign Address        (state)
-		#tcp        0      0  10.91.27.26.63905      10.91.27.26.1521        ESTABLISHED
 		#tcp        0      0  10.91.27.26.59648      10.118.63.82.1521       ESTABLISHED
 		# 
 
-		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-			++WARNINGS[ "Apparently output from netstat on Linux or HP-UX..." ];
-		    }
+		++NOTICE[ "Input apparently from netstat on Linux or HP-UX..." ];
+
+		if ( tolower( LINE[ 6 ] ) ~ /established/ )
+			CONNTRACK[ "persistence" ] = 61;
+		    else if ( tolower( LINE[ 6 ] ) ~ /wait/ )
+			CONNTRACK[ "persistence" ] = 59;
+		    else
+			next;
+
 		if ( LINE[ 1 ] !~ /6$/ )
 			CONNTRACK[ "l3proto" ] = "ipv4";
 		    else
 			CONNTRACK[ "l3proto" ] = "ipv6";
-		CONNTRACK[ "l4proto" ] = LINE[ 1 ];
-		sub( /[46]$/, "", CONNTRACK[ "l4proto" ] );
+		CONNTRACK[ "l4proto" ] = replace( "[46]$", "", LINE[ 1 ] );
 
-		CONNTRACK[ "localPort" ] = LINE[ 4 ];
-		# cleanup "^IP:"
-		sub( /^.*[.:]/, "", CONNTRACK[ "localPort" ] );
-		CONNTRACK[ "sport" ] = int( CONNTRACK[ "localPort" ] );
+		CONNTRACK[ "localPort" ] = replace( "^.*[.:]", "", LINE[ 4 ] );
+		CONNTRACK[ "sport" ] = CONNTRACK[ "localPort" ]
 
-		CONNTRACK[ "remotePort" ] = LINE[ 5 ];
-		# cleanup "^IP:"
-		sub( /^.*[.:]/, "", CONNTRACK[ "remotePort" ] );
-		CONNTRACK[ "dport" ] = int( CONNTRACK[ "remotePort" ] );
+		CONNTRACK[ "remotePort" ] = replace( "^.*[.:]", "", LINE[ 5 ] );
+		CONNTRACK[ "dport" ] = CONNTRACK[ "remotePort" ]
 
-		CONNTRACK[ "remoteIP" ] = LINE[ 5 ];
-		# cleanup ":port$"
-		sub( /[.:][0-9]+$/, "", CONNTRACK[ "remoteIP" ] );
+		CONNTRACK[ "remoteIP" ] = replace( "[.:][0-9]+$", "", LINE[ 5 ] );
 		CONNTRACK[ "dst" ] = CONNTRACK[ "remoteIP" ];
 
-		CONNTRACK[ "localIP" ] = LINE[ 4 ];
-		# cleanup ":port$"
-		sub( /[.:][0-9]+$/, "", CONNTRACK[ "localIP" ] );
-		# correct truncation of localIP and remoteIP related to fixed-width of netstat-ouput on old Linux
+		CONNTRACK[ "localIP" ] = replace( "[.:][0-9]+$", "", LINE[ 4 ] );
+		CONNTRACK[ "src" ] = CONNTRACK[ "localIP" ];
+
+		# correct truncation of localIP and remoteIP related to fixed-width of netstat-ouput on old Linux or if netstat-parameters [--notrim||--wide] were not used
 		if ( OS == "Linux" && !( CONNTRACK[ "localIP" ] in localIPs ) && CONNTRACK[ "localIP" ] ~ /:/ ) {
 
 			# cleanup IPv6-Prefix "^::ffff:"
 			sub( /^[:f]+:/, "", CONNTRACK[ "localIP" ] );
-			sub( /^[:f]+:/, "", CONNTRACK[ "remoteIP" ] );
 
 			for ( i in localIPs )
 				if ( CONNTRACK[ "localIP" ] ~ ( "^" localIPs[ i ] ) ) {
-					sub( /\.[0-9]*$/, ".", CONNTRACK[ "remoteIP" ] );
-					CONNTRACK[ "dst" ] = CONNTRACK[ "remoteIP" ];
 					# trying to repair at least localIP
 					CONNTRACK[ "localIP" ] = i;
+					++NOTICE[ "Apparently truncated localIP " CONNTRACK[ "localIP" ] " got substituted by " i ];
 					break;
 				    }
+			if ( !( CONNTRACK[ "localIP" ] in localIPs ) ) {
+				sub( /\.[0-9]*$/, "/24", CONNTRACK[ "localIP" ] );
+				++WARNINGS[ "Because apparently truncated localIP " CONNTRACK[ "src" ] " could not be recognized as any local IP, it got substitued by " CONNTRACK[ "localIP" ] ];
+			    }
+
+			# cleanup IPv6-Prefix "^::ffff:"
+			sub( /^[:f]+:/, "", CONNTRACK[ "remoteIP" ] );
+
+			# probably the remoteIP was also truncated, but for sure not when the last quarter is >= 100. 
+			split( CONNTRACK[ "remoteIP" ], quad, "." );
+			if ( int( quad[ 4 ] ) < 100 ) {
+				# remoteIP could possibly also be a local one
+				for ( i in localIPs )
+					if ( CONNTRACK[ "remoteIP" ] ~ ( "^" localIPs[ i ] ) ) {
+						CONNTRACK[ "remoteIP" ] = i;
+						++NOTICE[ "Apparently truncated remoteIP " CONNTRACK[ "remoteIP" ] " got substituted by " i ];
+						break;
+					    }
+				if ( !( CONNTRACK[ "remoteIP" ] in localIPs ) ) {
+					sub( /\.[0-9]*$/, ".", CONNTRACK[ "remoteIP" ] );
+					++WARNINGS[ "Probably truncated remoteIP " CONNTRACK[ "dst" ] " substituted by " CONNTRACK[ "remoteIP" ] ];
+				    }
+			    }
+
+			CONNTRACK[ "src" ] = CONNTRACK[ "localIP" ];
+			CONNTRACK[ "dst" ] = CONNTRACK[ "remoteIP" ];
 		    }
-		CONNTRACK[ "src" ] = CONNTRACK[ "localIP" ];
 
-		if ( tolower( LINE[ 6 ] ) ~ /established/ )
-			CONNTRACK[ "persistence" ] = 61;
-		    else
-			CONNTRACK[ "persistence" ] = 59;
+	    } else {
+		if ( $0 !~ /BOUND/ && $0 !~ /IDLE/ && $0 !~ /LISTEN/ && LINE[ 5 ] != "*.*" )
+			++NOTICE[ "input line ignored: " $0 ];
+		next;
+	    }
 
-	    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-		++WARNINGS[ "connection bypassed: " $0 ];
-		next;
-	    } else
-		next;
 
 	# map localIP and remoteIP site
 	if ( ( CONNTRACK[ "src" ] in localIPs && CONNTRACK[ "dst" ] in localIPs ) ) {
 		CONNTRACK[ "direction" ] = "local";
 	    } else if ( CONNTRACK[ "src" ] in localIPs ) {
 		CONNTRACK[ "localIP" ] = CONNTRACK[ "src" ];
-		CONNTRACK[ "localPort" ] = int( CONNTRACK[ "sport" ] );
+		CONNTRACK[ "localPort" ] = CONNTRACK[ "sport" ];
 		CONNTRACK[ "remoteIP" ] = CONNTRACK[ "dst" ];
-		CONNTRACK[ "remotePort" ] = int( CONNTRACK[ "dport" ] );
+		CONNTRACK[ "remotePort" ] = CONNTRACK[ "dport" ];
 	    } else if ( CONNTRACK[ "dst" ] in localIPs ) {
 		CONNTRACK[ "localIP" ] = CONNTRACK[ "dst" ];
-		CONNTRACK[ "localPort" ] = int( CONNTRACK[ "dport" ] );
+		CONNTRACK[ "localPort" ] = CONNTRACK[ "dport" ];
 		CONNTRACK[ "remoteIP" ] = CONNTRACK[ "src" ];
-		CONNTRACK[ "remotePort" ] = int( CONNTRACK[ "sport" ] );
+		CONNTRACK[ "remotePort" ] = CONNTRACK[ "sport" ];
 	    } else if (! ( "localIP" in CONNTRACK )) {
+
 		# either both IPs are foreign or blacklisted
-		# or some string got shortened
-		CONNTRACK[ "direction" ] = "foreign";
+		# or some string got shortened beyond reconizability
+		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+			++WARNINGS[ "foreign connection: " $0 ];
+		    }
+
+		# FIXME: do something better about this!
+		next;
 	    }
 
 
 	# conjecture direction
-	if ( CONNTRACK[ "direction" ] == "foreign" ) {
-		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-			++WARNINGS[ "foreign connection: " $0 ];
-# FIXME: do somesing better about this!
-			next;
-		    }
-	    } else if ( CONNTRACK[ "direction" ] == "local" ) {
+	if ( CONNTRACK[ "direction" ] == "local" ) {
 		if ( CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "sport" ] in SERVICES ) {
-			CONNTRACK[ "remotePort" ] = int( CONNTRACK[ "sport" ] );
+			CONNTRACK[ "remotePort" ] = CONNTRACK[ "sport" ];
+			CONNTRACK[ "localIP" ] = CONNTRACK[ "dst" ];
+			CONNTRACK[ "remoteIP" ] = CONNTRACK[ "src" ];
 			CONNTRACK[ "client" ] = CONNTRACK[ "localIP" ];
 			CONNTRACK[ "server" ] = CONNTRACK[ "remoteIP" ];
 		    } else {
-			CONNTRACK[ "remotePort" ] = int( CONNTRACK[ "dport" ] );
+			CONNTRACK[ "remotePort" ] = CONNTRACK[ "dport" ];
+			CONNTRACK[ "localIP" ] = CONNTRACK[ "src" ];
+			CONNTRACK[ "remoteIP" ] = CONNTRACK[ "dst" ];
 			CONNTRACK[ "client" ] = CONNTRACK[ "remoteIP" ];
 			CONNTRACK[ "server" ] = CONNTRACK[ "localIP" ];
 		    }
@@ -734,33 +717,42 @@ BEGIN{
 		CONNTRACK[ "server" ] = "localhost";
 		CONNTRACK[ "service" ] = CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "remotePort" ];
 		CONNTRACK[ "localPort" ] = 0;
-	    } else if ( ( CONNTRACK[ "remotePort" ] < 1024 && CONNTRACK[ "localPort" ] > ( Portrange[ 1 ] > 0 ? Portrange[ 1 ] : CONNTRACK[ "remotePort" ] ) ) ||	\
+
+	    # explicit casting as integer via int() to avoid string-comparison
+	    } else if ( ( int( CONNTRACK[ "remotePort" ] ) < 1024 &&	\
+			int( CONNTRACK[ "localPort" ] ) > ( int( Portrange[ 1 ] ) > 0 ? int( Portrange[ 1 ] ) : int( CONNTRACK[ "remotePort" ] ) ) ) ||	\
 		    ! ( CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "localPort" ] in SERVICES )) {
 		CONNTRACK[ "direction" ] = "outgoing";
 		CONNTRACK[ "client" ] = CONNTRACK[ "localIP" ];
 		CONNTRACK[ "server" ] = CONNTRACK[ "remoteIP" ];
 		CONNTRACK[ "service" ] = CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "remotePort" ];
 		CONNTRACK[ "localPort" ] = 0;
-		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-			if ( CONNTRACK[ "localPort" ] > ( Portrange[ 1 ] > 0 ? Portrange[ 1 ] : CONNTRACK[ "remotePort" ] ) ) {
-				++WARNINGS[ "highport-connection: " $0 ];
-			    }
+
+		if ( int( CONNTRACK[ "localPort" ] ) > ( int( Portrange[ 1 ] ) > 0 ? int( Portrange[ 1 ] ) : int( CONNTRACK[ "remotePort" ] ) ) ) {
+			++NOTICE[ "highport-connection: " $0 ];
 		    }
+
 	    } else if ( CONNTRACK[ "localPort" ] == CONNTRACK[ "remotePort" ] ) {
 		CONNTRACK[ "direction" ] = "peer2peer";
 		CONNTRACK[ "client" ] = CONNTRACK[ "localIP" ];
 		CONNTRACK[ "server" ] = CONNTRACK[ "remoteIP" ];
 		CONNTRACK[ "service" ] = CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "remotePort" ];
-	    } else if ( CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "localPort" ] in SERVICES && CONNTRACK[ "localPort" ] < ( Portrange[ 1 ] > 0 ? Portrange[ 1 ] : 32768 ) ) {
+
+	    # explicit casting as integer via int() to avoid string-comparison
+	    } else if ( CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "localPort" ] in SERVICES &&	\
+		    int( CONNTRACK[ "localPort" ] ) < ( int( Portrange[ 1 ] ) > 0 ? int( Portrange[ 1 ] ) : 32768 ) ) {
 		CONNTRACK[ "direction" ] = "incoming";
 		CONNTRACK[ "client" ] = CONNTRACK[ "remoteIP" ];
 		CONNTRACK[ "server" ] = CONNTRACK[ "localIP" ];
 		CONNTRACK[ "service" ] = CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "localPort" ];
 		CONNTRACK[ "remotePort" ] = 0;
+
 	    } else {
 		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 			++WARNINGS[ "unrecognized direction: " $0 ];
 		    }
+
+		# FIXME: do something better about this!
 		next;
 	    }
 
@@ -769,8 +761,12 @@ BEGIN{
 		CONNTRACK[ "daemon" ] = ">";
 	    else if ( CONNTRACK[ "service" ] in SERVICES )
 		CONNTRACK[ "daemon" ] = SERVICES[ CONNTRACK[ "service" ] ];
-	    else
-		CONNTRACK[ "daemon" ] = "?";
+	    else {
+		if ( !( CONNTRACK[ "localIP" ] in IPBLACKLIST || CONNTRACK[ "remoteIP" ] in IPBLACKLIST ) )
+			++WARNINGS[ "unrecognized service: " $0 ];
+			CONNTRACK[ "daemon" ] = "?";
+	    }
+
 
 	if (! ( CONNTRACK[ "direction" ] == "local"	|| CONNTRACK[ "direction"  ] == "foreign"		|| \
 	    CONNTRACK[ "localPort" ] in PORTBLACKLIST	|| CONNTRACK[ "remotePort" ] in PORTBLACKLIST	|| \
@@ -781,14 +777,13 @@ BEGIN{
 			CONNINDEX = CONNINDEX SUBSEP CONNTRACK[ OUTPUTFORMAT[i] ];
 		++CONNECTIONS[ CONNINDEX ];
 
-	    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-		CONNINDEX = CONNTRACK[ OUTPUTFORMAT[ 1 ] ];
-		for ( i=2; OUTPUTFORMAT[ i+1 ] != ""; i++ )
-			CONNINDEX = CONNINDEX SUBSEP CONNTRACK[ OUTPUTFORMAT[i] ];
-		++CONNECTIONS[ CONNINDEX ];
-		next;
 	    } else
-
+		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+			CONNINDEX = CONNTRACK[ OUTPUTFORMAT[ 1 ] ];
+			for ( i=2; OUTPUTFORMAT[ i+1 ] != ""; i++ )
+				CONNINDEX = CONNINDEX SUBSEP CONNTRACK[ OUTPUTFORMAT[i] ];
+			++CONNECTIONS[ CONNINDEX ];
+		    }
 		next;
     }
 
@@ -815,7 +810,9 @@ END{
 		for ( i in WARNINGS )
 			print i > LOGFILE;
 	if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-		printf( "#%s\n", INDEX ) > LOGFILE;
+		for ( i in NOTICE )
+			print i > LOGFILE;
+		printf( "\n#%s\n", INDEX ) > LOGFILE;
 		for ( i in CONNECTIONS )
 			printf( "%s,%d,%d\n", i, CONNECTIONS[i], SAVEDCONNECTIONS[i] ) > LOGFILE;
 	    }
