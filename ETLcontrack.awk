@@ -4,51 +4,55 @@
 # ./bin/ETLcontrack.awk 
 # 
 # accepted parameters:
+# -v OutputFormat="l4proto,appPort,direction,localIP,remoteIP,counter"
 # -v STATEFILE=$PATH/$FILE.csv 
 # -v IPblacklist="127.0.0.1 192.168.49.1"
 # -v IPwhitelist="10.119.146.19 10.110.7.244"
-# -v HOSTNAME="myhostname"
 # -v PORTblacklist="22 111 2048 2049"
 # -v TCPports="80 443"	NOT to be used beyond special circumstances!
 # -v UDPports="123"	NOT to be used beyond special circumstances!
+# -v HOSTNAME="myname"	NOT to be used beyond special circumstances!
 # *_conntrack-file	if another file beyond /proc/net/ip_conntrack or /proc/net/nf_conntrack is to be read
 # 
 
 BEGIN {
 	SUBSEP=",";
 
-	# Define fields in StateFile
-	if ( FileFormat != "" ) {
-		if ( FileFormat ~ /,/ )
-			split( FileFormat, FILEFORMAT, "," );
+	# Define fields in Output and StateFile
+	if ( OutputFormat != "" ) {
+		if ( OutputFormat ~ /,/ )
+			split( OutputFormat, OUTPUTFORMAT, "," );
 		    else
-			split( FileFormat, FILEFORMAT );
+			split( OutputFormat, OUTPUTFORMAT );
 	    } else
-		split( "hostname,direction,l4proto,localIP,localPort,remoteIP,remotePort,counter", FILEFORMAT, "," );
+		split( "hostname,l4proto,appPort,direction,localIP,localPort,remoteIP,remotePort,counter", OUTPUTFORMAT, "," );
+#		split( "l4proto,localIP,localPort,remoteIP,remotePort,counter", OUTPUTFORMAT, "," );
+#		split( "l4proto,appPort,direction,localIP,remoteIP,counter", OUTPUTFORMAT, "," );
 	# predefine Index as Headline
-	INDEX=FILEFORMAT[1];
-	for ( i=2; FILEFORMAT[i] != ""; i++ )
-		INDEX = INDEX SUBSEP FILEFORMAT[i];
+	INDEX=OUTPUTFORMAT[1];
+	for ( i=2; OUTPUTFORMAT[i] != ""; i++ )
+		INDEX = INDEX SUBSEP OUTPUTFORMAT[i];
 
 	# read StateFile
 	if ( STATEFILE != "" ) {
-		while (( getline i < STATEFILE ) > 0 )
-			if ( i !~ /^#/ ) {
-				WIDTH=split( i, DBROW, SUBSEP );
+		while (( getline CONNECTION < STATEFILE ) > 0 )
+			if ( CONNECTION !~ /^#/ ) {
+				split( CONNECTION, LINE, SUBSEP );
+				CONNINDEX=LINE[1];
+				for ( i=2; OUTPUTFORMAT[ i+1 ] != ""; i++ )
+					CONNINDEX = CONNINDEX SUBSEP LINE[i];
+
 				# cap maxcount at some arbitrary number as e.g. 1440
-				COUNTER=( DBROW[WIDTH] > 24*60 ? 24*60 : DBROW[WIDTH] );
-				delete DBROW[WIDTH];
-				# FixMe: dynamic Index
-				CONNECTIONS[DBROW[1],DBROW[2],DBROW[3],DBROW[4],DBROW[5],DBROW[6],DBROW[7]]=COUNTER;
+				CONNECTIONS[ CONNINDEX ] = (  LINE[i] > 24*60 ? 24*60 :  LINE[i] );
 				if ( DEBUG != 0 || DEBUG != "" )
-					printf( "%s\n", i ) > "/dev/stderr";
+					printf( "%s\n", CONNECTION ) > "/dev/stderr";
 			    }
 		close( STATEFILE );
 		if ( DEBUG != 0 || DEBUG != "" )
 			printf("\n") > "/dev/stderr";
 	    }
 
-	# blacklist localIP or remoteIP IPWHITELIST
+	# blacklist local or remote IPs
 	if ( IPblacklist != "" ) {
 		if ( IPblacklist ~ /,/ )
 			split( IPblacklist, IPBLACKLIST, "," );
@@ -114,15 +118,16 @@ BEGIN {
 		    } else if (( "type ifconfig 2>/dev/null" | getline junk ) > 0) {
 			CMD=" ifconfig -a | awk 'sub(/inet addr:/,\"\"){print $1}' ";
 		    } else {
-			print "\n  Neither ip nor ifconfig found!\n  Please provide IPWHITELIST with parameter '-v IPwhitelist=[...]'\n" > "/dev/stderr";
+			print "\n  Neither ip nor ifconfig found!\n  Please provide relevant IP-adresses with parameter '-v IPwhitelist=[...]'\n" > "/dev/stderr";
 			if (! ( DEBUG != 0 || DEBUG != "" ))
 				exit ERROR=1;
 		    }
+		close( "type ip 2>/dev/null" );
+		close( "type ifconfig 2>/dev/null" );
+
 		while ( ( CMD | getline i ) > 0 && junk != "" )
 			++IPWHITELIST[i];
 		close( CMD );
-		close( "type ip 2>/dev/null" );
-		close( "type ifconfig 2>/dev/null" );
 
 		if ( DEBUG != 0 || DEBUG != "" ) {
 			for ( i in IPWHITELIST ) print i;
@@ -193,9 +198,11 @@ BEGIN {
 
 
 	# if input-stream is not to be read from STDIN
-	CMD="file -L /dev/stdin";
-	if (( CMD | getline STDIN ) > 0 && ( STDIN !~ /fifo/ && STDIN !~ /pipe/ ) ) {
+	if (( "file -L /dev/stdin" | getline STDIN ) > 0 && ( STDIN !~ /fifo/ && STDIN !~ /pipe/ ) ) {
 		if ( ARGC==1 ) {
+			# not any input-files was provided on commandline
+
+			# check priviledge because /proc/net/ip_conntrack and /proc/net/nf_conntrack are only readable to root
 			if (( "id -u" | getline UID ) > 0 && UID>0 ) {
 				print "\n  Skript must be run as root!\n" > "/dev/stderr";
 				if (! ( DEBUG != 0 || DEBUG != "" ))
@@ -203,7 +210,6 @@ BEGIN {
 			    }
 			close( "id -u" );
 
-			# not any input-files was provided on commandline
 			# autodetect wethter /proc/net/ip_conntrack or /proc/net/nf_conntrack is to be read
 			if (( getline i < "/proc/net/ip_conntrack" ) > 0 ) {
 				ARGC++;
@@ -214,32 +220,38 @@ BEGIN {
 				ARGV[1]="/proc/net/nf_conntrack";
 				close ("/proc/net/nf_conntrack");
 			    } else {
-				print "\n  Cannot read any conntrack-files!\n  Please modprobe depending on kernel-version either ip_conntrack or nf_conntrack!\n  Press <CTRL>+<c> to cancel command!\n" > "/dev/stderr"
+				print "\n  Cannot read any conntrack-files!\n  Please modprobe depending on kernel-version either ip_conntrack or nf_conntrack!\n" > "/dev/stderr";
 				if (! ( DEBUG != 0 || DEBUG != "" ))
 					exit ERROR=1;
 			    }
+
 		    } else for (i = 1; i < ARGC; i++) {
 			# at least something was provided on commandline
 			# check input-files for readability
-			if (ARGV[i] ~ /^[a-zA-Z_][a-zA-Z0-9_]*=.*/ || ARGV[i] ~ /^-/ || ARGV[i] == "/dev/stdin")
+			if (ARGV[i] ~ /^[a-zA-Z_][a-zA-Z0-9_]*=.*/ || ARGV[i] ~ /^-/ || ARGV[i] == "/dev/stdin") {
+				NoFileArgs++;
 				continue    # assignment or standard input
-			    else if ((getline junk < ARGV[i]) < 0) {
-				printf("%s/%s: %s unreadable!\n",i,ARGC-1,ARGV[i]) > "/dev/stderr"
-				close(ARGV[i])
-				delete ARGV[i]
+			    } else if ((getline junk < ARGV[i]) < 0) {
+				printf("%s/%s: %s unreadable!\n",i,ARGC-1,ARGV[i]) > "/dev/stderr";
+				close(ARGV[i]);
+				delete ARGV[i];
+				UnreadableFiles++;
 			    } else
-				close(ARGV[i])
-			# MISSING FEATURE: exit with error if none of the input-files is readable
+				close(ARGV[i]);
+		    }
+		if ( NoFileArgs + UnreadableFiles >= ARGC - 1 ) {
+			print "\n  Cannot read any files listed on commandline!\n  Please check arguments!" > "/dev/stderr";
+			exit ERROR=1;
 		    }
 	    }
-	close( CMD );
+	close( "file -L /dev/stdin" );
     }
 
 
 #main()
 {
-	split($0,LINE);
-	split("",CONNTRACK);
+	split( $0, LINE );
+	split( "", CONNTRACK );
 
 	# normalize Line wether /proc/net/ip_conntrack or /proc/net/nf_conntrack was read
 	if ( LINE[1] in L4PROTOCOLS ) {
@@ -285,7 +297,7 @@ BEGIN {
 		next;
 	    } else if ( ( CONNTRACK["src"] in IPWHITELIST ) && ( CONNTRACK["dst"] in IPWHITELIST ) ) {
 		if ( DEBUG != 0 || DEBUG != "" ) {
-			CONNTRACK["direction"]="localIP";
+			CONNTRACK["direction"]="local";
 			CONNTRACK["localIP"]=CONNTRACK["dst"];
 			CONNTRACK["localPort"]=CONNTRACK["sport"];
 			CONNTRACK["remoteIP"]=CONNTRACK["dst"];
@@ -317,13 +329,16 @@ BEGIN {
 		if (! ( CONNTRACK["localPort"] in TCPPORTS )) {
 			if (! ( "direction" in CONNTRACK ))
 				CONNTRACK["direction"]="outgoing";
+			CONNTRACK["appPort"]=CONNTRACK["remotePort"];
 			delete CONNTRACK["localPort"];
 		    } else if ( CONNTRACK["localPort"]==CONNTRACK["remotePort"] ) {
 			if (! ( "direction" in CONNTRACK ))
 				CONNTRACK["direction"]="bidirectional";
+			CONNTRACK["appPort"]=CONNTRACK["remotePort"];
 		    } else if ( CONNTRACK["localPort"] in TCPPORTS ) {
 			if (! ( "direction" in CONNTRACK ))
 				CONNTRACK["direction"]="incoming";
+			CONNTRACK["appPort"]=CONNTRACK["localPort"];
 			delete CONNTRACK["remotePort"];
 		    } else
 			next;
@@ -332,12 +347,15 @@ BEGIN {
 			if (! ( "direction" in CONNTRACK ))
 				CONNTRACK["direction"]="outgoing";
 			delete CONNTRACK["localPort"];
+			CONNTRACK["appPort"]=CONNTRACK["remotePort"];
 		    } else if ( CONNTRACK["localPort"]==CONNTRACK["remotePort"] ) {
 			if (! ( "direction" in CONNTRACK ))
 				CONNTRACK["direction"]="bidirectional";
+			CONNTRACK["appPort"]=CONNTRACK["remotePort"];
 		    } else if ( CONNTRACK["localPort"] in UDPPORTS ) {
 			if (! ( "direction" in CONNTRACK ))
 				CONNTRACK["direction"]="incoming";
+			CONNTRACK["appPort"]=CONNTRACK["localPort"];
 			delete CONNTRACK["remotePort"];
 		    } else
 			next;
@@ -352,9 +370,9 @@ BEGIN {
 	CONNTRACK[ "hostname" ]=HOSTNAME;
 
 	if ( CONNTRACK["l4proto"] in L4PROTOCOLS ) {
-		CONNINDEX=CONNTRACK[ FILEFORMAT[1] ];
-		for ( i=2; FILEFORMAT[i+1] != ""; i++ )
-			CONNINDEX = CONNINDEX SUBSEP CONNTRACK[ FILEFORMAT[i]];
+		CONNINDEX=CONNTRACK[ OUTPUTFORMAT[1] ];
+		for ( i=2; OUTPUTFORMAT[i+1] != ""; i++ )
+			CONNINDEX = CONNINDEX SUBSEP CONNTRACK[ OUTPUTFORMAT[i]];
 		if ( CONNTRACK["persistence"]<60 || (! ( CONNINDEX in CONNECTIONS )) )
 			++CONNECTIONS[ CONNINDEX ];
 	    } else if ( DEBUG != 0 || DEBUG != "" ) {
@@ -362,7 +380,8 @@ BEGIN {
 			printf("%s=%s\n",i,CONNTRACK[i])
 		printf("\n")
 		next;
-	    }
+	    } else
+		next;
     }
 
 END {
