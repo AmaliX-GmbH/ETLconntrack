@@ -33,7 +33,7 @@
 # *_conntrack-file	# if another file beyond /proc/net/nf_conntrack or /proc/net/ip_conntrack or STDIN for netstat-output is to be read
 # 
 # 
-# v2.9 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
+# v2.91 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -126,18 +126,6 @@ BEGIN{
 		split( "", IPBLACKLIST );
 	    } else {
 		IPBLACKLIST[ "127.0.0.1"   ]	= "localhost";
-#		IPBLACKLIST[ "10.110.7.244" ]	= "denth7xr007";
-#		IPBLACKLIST[ "10.110.11.251" ]	= "denth7xr007";
-#		IPBLACKLIST[ "10.119.146.19" ]	= "denth7xr007";
-#		IPBLACKLIST[ "10.110.9.245" ]	= "denth7xr011";
-#		IPBLACKLIST[ "10.110.13.251" ]	= "denth7xr011";
-#		IPBLACKLIST[ "10.119.163.15" ]	= "denth7xr011";
-#		IPBLACKLIST[ "10.193.22.9" ]	= "ship01";
-#		IPBLACKLIST[ "10.193.22.10" ]	= "ship01";
-#		IPBLACKLIST[ "10.193.22.11" ]	= "ship01";
-#		IPBLACKLIST[ "10.198.0.100" ]	= "wasm01";
-#		IPBLACKLIST[ "10.193.17.13" ]	= "XyMon / BigBrother / Hobbit";
-#		IPBLACKLIST[ "10.198.0.245" ]	= "faip01 / debianmirror";
 #		IPBLACKLIST[ "" ]	= "";
 	    }
 
@@ -156,26 +144,6 @@ BEGIN{
 		split( "", PORTBLACKLIST );
 	    } else {
 		split( "", PORTBLACKLIST );
-
-#		PORTBLACKLIST[ "25"	] = "smtp";
-#		PORTBLACKLIST[ "53"	] = "dns";
-#		PORTBLACKLIST[ "111"	] = "portmap / NFS";
-#		PORTBLACKLIST[ "123"	] = "ntp";
-#		PORTBLACKLIST[ "161"	] = "snmp";
-#		PORTBLACKLIST[ "199"	] = "smux / SNMP Unix Multiplexer";
-#		PORTBLACKLIST[ "1500"	] = "dsmc / TSM Backup";
-#		PORTBLACKLIST[ "1501"	] = "dsmc / TSM Backup";
-#		PORTBLACKLIST[ "1556"	] = "pbx_exchange / Veritas NetBackup";
-#		PORTBLACKLIST[ "1557"	] = "pbx_exchange / Veritas NetBackup";
-#		PORTBLACKLIST[ "1581"	] = "TSM Webclient";
-#		PORTBLACKLIST[ "1984"	] = "bb / XyMon = BigBrother = Hobbit";
-#		PORTBLACKLIST[ "2049"	] = "nfs";
-#		PORTBLACKLIST[ "3181"	] = "Patrol";
-#		PORTBLACKLIST[ "10050"	] = "zabbix_agentd";
-#		PORTBLACKLIST[ "13722"	] = "bpjava-msvc / Veritas NetBackup";
-#		PORTBLACKLIST[ "13724"	] = "vnetd / Veritas NetBackup";
-#		PORTBLACKLIST[ "13782"	] = "bpcd / Veritas NetBackup";
-#		PORTBLACKLIST[ "13783"	] = "vopied / Veritas NetBackup";
 #		PORTBLACKLIST[ "" ] = "";
 	    }
 
