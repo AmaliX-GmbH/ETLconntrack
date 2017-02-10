@@ -348,9 +348,11 @@ BEGIN{
 					daemon = "-";
 
 				if ( !( port >= Portrange[ 1 ] && port <= Portrange[ 2 ] ) ) {
-					sub( /[46]$/, Service[ 1 ] );
+					sub( /[46]$/, "", Service[ 1 ] );
 					SERVICES[ Service[ 1 ] "/" port ] = daemon;
 				    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+					sub( /[46]$/, "", Service[ 1 ] );
+					SERVICES[ Service[ 1 ] "/" port ] = daemon;
 					print i > LOGFILE;
 				    }
 			    }
@@ -403,7 +405,7 @@ BEGIN{
 					port = Service[ 4 ];
 					sub( /^.*[.:]/, "", port );
 
-					sub( /[46]$/, Service[ 1 ] );
+					sub( /[46]$/, "", Service[ 1 ] );
 
 					SERVICES[ Service[ 1 ] "/" port ] = ( daemon != "" ? daemon : "-" );
 
@@ -580,6 +582,7 @@ BEGIN{
 		# normalize Line wether /proc/net/nf_conntrack or /proc/net/ip_conntrack was read
 		CONNTRACK[ "l3proto" ] = LINE[ 1 ];
 		CONNTRACK[ "l4proto" ] = LINE[ 3 ];
+		sub( /[46]$/, "", CONNTRACK[ "l4proto" ] );
 		CONNTRACK[ "persistence" ] = LINE[ 5 ];
 
 		for ( i=6; i<LINEWIDTH; i++ ) {
@@ -603,6 +606,7 @@ BEGIN{
 		# normalize Line wether /proc/net/nf_conntrack or /proc/net/ip_conntrack was read
 		CONNTRACK[ "l3proto" ] = "ipv4";
 		CONNTRACK[ "l4proto" ] = LINE[ 1 ];
+		sub( /[46]$/, "", CONNTRACK[ "l4proto" ] );
 		CONNTRACK[ "persistence" ] = LINE[ 3 ];
 
 		for ( i=4; i<LINEWIDTH; i++ ) {
@@ -643,6 +647,7 @@ BEGIN{
 		    else
 			CONNTRACK[ "l3proto" ] = "ipv6";
 		CONNTRACK[ "l4proto" ] = LINE[ 1 ];
+		sub( /[46]$/, "", CONNTRACK[ "l4proto" ] );
 
 		CONNTRACK[ "localPort" ] = LINE[ 4 ];
 		# cleanup "^IP:"
@@ -668,7 +673,6 @@ BEGIN{
 			# cleanup IPv6-Prefix "^::ffff:"
 			sub( /^[:f]+:/, "", CONNTRACK[ "localIP" ] );
 			sub( /^[:f]+:/, "", CONNTRACK[ "remoteIP" ] );
-			sub( /6$/, "", CONNTRACK[ "l4proto" ] );
 
 			for ( i in localIPs )
 				if ( CONNTRACK[ "localIP" ] ~ ( "^" localIPs[ i ] ) ) {
@@ -740,6 +744,11 @@ BEGIN{
 		CONNTRACK[ "server" ] = CONNTRACK[ "remoteIP" ];
 		CONNTRACK[ "service" ] = CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "remotePort" ];
 		CONNTRACK[ "localPort" ] = 0;
+		if ( CONNTRACK[ "localPort" ] > ( Portrange[ 1 ] > 0 ? Portrange[ 1 ] : CONNTRACK[ "remotePort" ] )&& ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) ) {
+			for ( i in CONNTRACK )
+				printf( "%s=%s\n", i, CONNTRACK[i] ) > LOGFILE;
+			printf( "\n" );
+		    }
 	    } else if ( CONNTRACK[ "localPort" ] == CONNTRACK[ "remotePort" ] ) {
 		CONNTRACK[ "direction" ] = "peer2peer";
 		CONNTRACK[ "client" ] = CONNTRACK[ "localIP" ];
