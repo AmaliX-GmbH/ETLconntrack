@@ -25,7 +25,8 @@
 # 
 # on Windows:
 #	netstat -an | awk -f ETLconntrack.awk
-# 
+# You need awk.exe, tty.exe and uname.exe as well as dependencies libiconv2.dll and libintl3.dll,
+# all can be found as packages gawk and coreutils on https://sourceforge.net/projects/gnuwin32/
 # 
 # parameters considered to be used frequently
 # -v STATEFILE=$PATH/$FILE.csv 
@@ -85,12 +86,16 @@ function replace( SEARCH, REPLACEMENT, TARGET ){
 
 BEGIN{
 	SUBSEP = ",";
-	# print ERROR > /dev/stderr" is not portable for HP-UX!
-	if ( LOGFILE == "" && ( "find /dev/stderr 2>/dev/null" | getline i ) > 0 )
-		LOGFILE = "/dev/stderr";
-	    else if ( LOGFILE == "" )
-		LOGFILE = "/dev/tty";
+	# print ERROR > /dev/stderr" is not portable for HP-UX nor for windows32!
+	if ( LOGFILE == "" )
+		if ( ( "find /dev/stderr 2>/dev/null" | getline i ) > 0 )
+			LOGFILE = "/dev/stderr";
+		    else if ( ( "find /dev/tty 2>/dev/null" | getline i ) > 0 )
+			LOGFILE = "/dev/tty";
+		    else if ( LOGFILE == "" )
+			LOGFILE = "CON";
 	close( "find /dev/stderr 2>/dev/null" );
+	close( "find /dev/tty 2>/dev/null" );
 
 	# Define fields in Output and StateFile
 	if ( OutputFormat != "" ) {
@@ -138,9 +143,12 @@ BEGIN{
 	    } else {
 		if ( ( "find /dev/stdout 2>/dev/null" | getline i ) > 0 )
 			STATEFILE = "/dev/stdout";
-		    else
+		else if ( ( "find /dev/tty 2>/dev/null" | getline i ) > 0 )
 			STATEFILE = "/dev/tty";
+		else
+			STATEFILE = "CON";
 		close( "find /dev/stdout 2>/dev/null" );
+		close( "find /dev/tty 2>/dev/null" );
 	    }
 
 	# blacklist local or remote IPs
@@ -288,6 +296,9 @@ BEGIN{
 				}
 			    }
 			close( CMD );
+
+			# windows32 apparently hides localhost
+			++localIPs[ "127.0.0.1" ];
 		    }
 
 		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
@@ -511,7 +522,7 @@ BEGIN{
 
 		# at least something was provided on commandline
 		# check input-files for readability
-		if ( ARGV[i] ~ /^[a-zA-Z_][a-zA-Z0-9_]*=.*/ || ARGV[i] ~ /^-/ || ARGV[i] == "/dev/stdin") {
+		if ( ARGV[i] ~ /^[a-zA-Z_][a-zA-Z0-9_]*=.*/ || ARGV[i] ~ /^-/ || ARGV[i] == "/dev/stdin" ) {
 			NoFileArgs++;
 			printf( "ERROR: Unhandled argument!\n   '%s' doesn't look like a file!\n"i, ARGV[i]) > LOGFILE;
 			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
@@ -533,7 +544,7 @@ BEGIN{
 		    }
 	    }
 
-	if ( NoFileArgs + UnreadableFiles > ARGC - 1 || ( ARGC == 1 && STDIN ~ /\// ) ) {
+	if ( NoFileArgs + UnreadableFiles > ARGC - 1 || ( ARGC == 1 && ( STDIN ~ /\// || STDIN == "CON" ) ) ) {
 		print "ERROR: Cannot read any files listed on commandline!\n   Please check arguments!" > LOGFILE;
 		exit ERROR = 1;
 	    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
