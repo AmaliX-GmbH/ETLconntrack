@@ -5,7 +5,7 @@
 # 
 # HowTo Use:
 # on Linux:	# see http://www.iptables.info/en/connection-state.html
-#	modprobe nf_conntrack || modprobe ip_conntrack
+#	modprobe nf_conntrack_ipv4 || modprobe ip_conntrack
 #	./bin/ETLcontrack.awk 
 #   or on RHEL[5,6] and compatible systems
 #	netstat -tune --notrim	| awk -f ETLconntrack.awk
@@ -460,7 +460,7 @@ BEGIN{
 						    } else
 							exit ERROR = 1;
 					    } else {
-						print "ERROR: Cannot read any conntrack-files!\n   Please modprobe depending on kernel-version either nf_conntrack or ip_conntrack!\n" > LOGFILE;
+						print "ERROR: Cannot read any conntrack-files!\n   Please modprobe depending on kernel-version either nf_conntrack_ipv4 or ip_conntrack!\n" > LOGFILE;
 						if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 						    } else
 							exit ERROR = 1;
