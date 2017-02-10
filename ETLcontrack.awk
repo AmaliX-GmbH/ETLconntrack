@@ -18,6 +18,7 @@
 # feel free to ask for further customization
 # 
 # FixMe: No IPv6 yet
+# FixMe: runs only on modern Linux >v2.4
 # 
 
 BEGIN {
@@ -109,8 +110,16 @@ BEGIN {
 	sub(/[^A-Za-z0-9-].*$/,"",HOSTNAME)
 
 	#
+	if (( "uname -s" | getline OS ) >0 && ( OS != "Linux" )) {
+		print "\n  Unknown OS \"" OS "\"!\n  Please gather netstat-data manually and run skript on supported awk-version.\n" > "/dev/stderr";
+		if (! ( DEBUG != 0 || DEBUG != "" ))
+			exit ERROR=1;
+	    }
+	close( "uname -s" );
+
+	#
 	if ( IPwhitelist != "" ) {
-		# only specific IPWHITELIST are to be analyzed
+		# only specific local IPs are to be analyzed
 		if ( IPwhitelist ~ SUBSEP )
 			split( IPwhitelist, IPWHITELIST, SUBSEP );
 		    else
@@ -122,13 +131,11 @@ BEGIN {
 			delete IPWHITELIST[i];
 		    }
 	    } else {
-		# any of localIP and remoteIP IPWHITELIST are to be analyzed
+		# any local IP is to be analyzed
 		if (( "type ip 2>/dev/null" | getline junk ) > 0) {
 			CMD=" ip -4 -o a s 2>/dev/null | awk '{ print $4}' | cut -d '/' -f 1 ";
-		    } else if (( "type ifconfig 2>/dev/null" | getline junk ) > 0) {
-			CMD=" ifconfig -a | awk 'sub(/inet addr:/,\"\"){print $1}' ";
-		    } else if (( "file /sbin/ifconfig 2>/dev/null" | getline junk ) > 0) {
-			CMD=" /sbin/ifconfig -a | awk 'sub(/inet addr:/,\"\"){print $1}' ";
+		    } else if (( "find /sbin/ifconfig 2>/dev/null" | getline junk ) > 0) {
+			CMD=" /sbin/ifconfig -a | awk '{if ( $1 ~ /^inet$/ ) { if ($2 ~ /:/) print substr( $2, index($2,\":\")+1); else print $2;}}'"
 		    } else {
 			print "\n  Neither ip nor ifconfig found!\n  Please provide relevant IP-adresses with parameter '-v IPwhitelist=[...]'\n" > "/dev/stderr";
 			if (! ( DEBUG != 0 || DEBUG != "" ))
@@ -142,8 +149,10 @@ BEGIN {
 		close( CMD );
 
 		if ( DEBUG != 0 || DEBUG != "" ) {
-			for ( i in IPWHITELIST ) print i;
-			printf("\n");
+			print CMD;
+			for ( i in IPWHITELIST )
+				print i > "/dev/stderr";
+			printf("\n") > "/dev/stderr";
 		    }
 	    }
 
@@ -183,16 +192,22 @@ BEGIN {
 			delete SERVICES[i];
 		    }
 	    } else {
+
 		CMD=" netstat -tulpn 2>/dev/null ";
 		while (( CMD | getline i) > 0) {
+
 			gsub( /[ ]+/, SUBSEP, i );
 			lastColumn=split( i, Service, SUBSEP );
+
 			if ( Service[1] in L4PROTOCOLS ) {
 				port = Service[4];
 				sub( /^.*[.:]/, "", port );
 				daemon = Service[ lastColumn -1 ];
 				sub( /[0-9]*\//, "", daemon );
 				SERVICES[ substr( Service[1], 1, 3 ) "/" port ] = ( daemon != "" ? daemon : "-" );
+
+			    } else if ( DEBUG != 0 || DEBUG != "" ) {
+				print i > "/dev/stderr";
 			    }
 		    }
 		close( CMD );
@@ -258,7 +273,7 @@ BEGIN {
 	# normalize Line wether /proc/net/ip_conntrack or /proc/net/nf_conntrack was read
 	if ( LINE[1] ~ /^ipv[46]$/ && LINE[3] in L4PROTOCOLS ) {
 
-		# looks like nf_conntrack
+	# looks like nf_conntrack
 		CONNTRACK[ "l3proto" ] = LINE[1];
 		CONNTRACK[ "l4proto" ] = LINE[3];
 		CONNTRACK[ "persistence" ] = LINE[5];
@@ -275,7 +290,7 @@ BEGIN {
 
 	    } else if ( LINE[5] ~ /=/ &&  LINE[6] ~ /=/ && LINE[1] in L4PROTOCOLS ) {
 
-		# looks like ip_conntrack
+	# looks like ip_conntrack
 		CONNTRACK[ "l3proto" ] = "ipv4";
 		CONNTRACK[ "l4proto" ] = LINE[1];
 		CONNTRACK[ "persistence" ] = LINE[3];
@@ -294,38 +309,38 @@ BEGIN {
 
 	    } else if ( LINE[4] ~ /:/ && LINE[5] ~ /:/ && LINE[1] in L4PROTOCOLS ) {
 
-			# looks like Linux-netstat
-			if ( LINE[1] !~ /6$/ )
-				CONNTRACK[ "l3proto" ] = "ipv4";
-			    else
-				CONNTRACK[ "l3proto" ] = "ipv6";
-			CONNTRACK[ "l4proto" ] = substr( LINE[1], 1, 3);
+	# looks like Linux-netstat
+		if ( LINE[1] !~ /6$/ )
+			CONNTRACK[ "l3proto" ] = "ipv4";
+		    else
+			CONNTRACK[ "l3proto" ] = "ipv6";
+		CONNTRACK[ "l4proto" ] = substr( LINE[1], 1, 3);
 
-			CONNTRACK[ "localIP" ] = LINE[4];
-			sub( /[.:][0-9]+$/, "", CONNTRACK[ "localIP" ] );
-			sub( /.*:/, "", CONNTRACK[ "localIP" ] );
-			CONNTRACK["src"] = CONNTRACK["localIP"];
+		CONNTRACK[ "localIP" ] = LINE[4];
+		sub( /[.:][0-9]+$/, "", CONNTRACK[ "localIP" ] );
+		sub( /.*:/, "", CONNTRACK[ "localIP" ] );
+		CONNTRACK["src"] = CONNTRACK["localIP"];
 
-			CONNTRACK[ "localPort" ] = LINE[4];
-			sub( /^.*[.:]/, "", CONNTRACK[ "localPort" ] );
-			CONNTRACK["sport"] = CONNTRACK["localPort"];
+		CONNTRACK[ "localPort" ] = LINE[4];
+		sub( /^.*[.:]/, "", CONNTRACK[ "localPort" ] );
+		CONNTRACK["sport"] = CONNTRACK["localPort"];
 
-			CONNTRACK[ "remoteIP" ] = LINE[5];
-			sub( /[.:][0-9]+$/, "", CONNTRACK[ "remoteIP" ] );
-			sub( /^.*:/, "", CONNTRACK[ "remoteIP" ] );
-			CONNTRACK["dst"] = CONNTRACK["remoteIP"];
+		CONNTRACK[ "remoteIP" ] = LINE[5];
+		sub( /[.:][0-9]+$/, "", CONNTRACK[ "remoteIP" ] );
+		sub( /^.*:/, "", CONNTRACK[ "remoteIP" ] );
+		CONNTRACK["dst"] = CONNTRACK["remoteIP"];
 
-			CONNTRACK[ "remotePort" ] = LINE[5];
-			sub( /^.*[.:]/, "", CONNTRACK[ "remotePort" ] );
-			CONNTRACK["dport"] = CONNTRACK["remotePort"];
+		CONNTRACK[ "remotePort" ] = LINE[5];
+		sub( /^.*[.:]/, "", CONNTRACK[ "remotePort" ] );
+		CONNTRACK["dport"] = CONNTRACK["remotePort"];
 
-			if ( LINE[6]=="ESTABLISHED" )
-				CONNTRACK[ "persistence" ] = 61;
-			    else
-				CONNTRACK[ "persistence" ] = 59;
+		if ( LINE[6]=="ESTABLISHED" )
+			CONNTRACK[ "persistence" ] = 61;
+		    else
+			CONNTRACK[ "persistence" ] = 59;
 
 	    } else if ( DEBUG != 0 || DEBUG != "" ) {
-		printf("%s \n", $0)
+		printf("%s \n", $0) > "/dev/stderr";
 		next;
 	    } else
 		next;
@@ -384,7 +399,7 @@ BEGIN {
 		CONNTRACK["remotePort"] = 0;
 	    } else if ( DEBUG != 0 || DEBUG != "" ) {
 		for (i in CONNTRACK)
-			printf("%s=%s\n",i,CONNTRACK[i]);
+			printf("%s=%s\n",i,CONNTRACK[i]) > "/dev/stderr";
 		printf("\n");
 		next;
 	    } else
