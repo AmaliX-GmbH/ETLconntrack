@@ -30,7 +30,7 @@
 # *_conntrack-file	# if another file beyond /proc/net/nf_conntrack or /proc/net/ip_conntrack or STDIN for netstat-output is to be read
 # 
 # 
-# v2.4 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
+# v2.5 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -64,6 +64,10 @@ BEGIN{
 	    else if ( LOGFILE == "" )
 		LOGFILE = "/dev/tty";
 	close( "find /dev/stderr" );
+
+	# sleep for up to four seconds to distribute load on virtual systems
+#	srand();
+#	system( "sleep " int( 1 + rand() * 4 ) );
 
 	# Define fields in Output and StateFile
 	if ( OutputFormat != "" ) {
@@ -149,10 +153,25 @@ BEGIN{
 	    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 		    split( "", PORTBLACKLIST );
 	    } else {
-		PORTBLACKLIST[ "53" ] = "DNS";
-		PORTBLACKLIST[ "123" ] = "NTP";
-		PORTBLACKLIST[ "1984" ] = "XyMon / BigBrother / Hobbit";
-		PORTBLACKLIST[ "3181" ] = "Patrol";
+		PORTBLACKLIST[ "25"	] = "smtp";
+		PORTBLACKLIST[ "53"	] = "dns";
+		PORTBLACKLIST[ "111"	] = "portmap / NFS";
+		PORTBLACKLIST[ "123"	] = "ntp";
+		PORTBLACKLIST[ "161"	] = "snmp";
+		PORTBLACKLIST[ "199"	] = "smux / SNMP Unix Multiplexer";
+		PORTBLACKLIST[ "1500"	] = "dsmc / TSM Backup";
+		PORTBLACKLIST[ "1501"	] = "dsmc / TSM Backup";
+		PORTBLACKLIST[ "1556"	] = "pbx_exchange / Veritas NetBackup";
+		PORTBLACKLIST[ "1557"	] = "pbx_exchange / Veritas NetBackup";
+		PORTBLACKLIST[ "1581"	] = "TSM Webclient";
+		PORTBLACKLIST[ "1984"	] = "bb / XyMon = BigBrother = Hobbit";
+		PORTBLACKLIST[ "2049"	] = "nfs";
+		PORTBLACKLIST[ "3181"	] = "Patrol";
+		PORTBLACKLIST[ "10050"	] = "zabbix_agentd";
+		PORTBLACKLIST[ "13722"	] = "bpjava-msvc / Veritas NetBackup";
+		PORTBLACKLIST[ "13724"	] = "vnetd / Veritas NetBackup";
+		PORTBLACKLIST[ "13782"	] = "bpcd / Veritas NetBackup";
+		PORTBLACKLIST[ "13783"	] = "vopied / Veritas NetBackup";
 #		PORTBLACKLIST[ "" ] = "";
 	    }
 
