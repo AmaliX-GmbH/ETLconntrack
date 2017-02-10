@@ -733,7 +733,7 @@ BEGIN{
 		CONNTRACK[ "server" ] = "localhost";
 		CONNTRACK[ "service" ] = CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "remotePort" ];
 		CONNTRACK[ "localPort" ] = 0;
-	    } else if ( ( CONNTRACK[ "remotePort" ] < 2**10 && CONNTRACK[ "localPort" ] > ( Portrange[ 1 ] > 0 ? Portrange[ 1 ] : CONNTRACK[ "remotePort" ] ) ) ||	\
+	    } else if ( ( CONNTRACK[ "remotePort" ] < 1024 && CONNTRACK[ "localPort" ] > ( Portrange[ 1 ] > 0 ? Portrange[ 1 ] : CONNTRACK[ "remotePort" ] ) ) ||	\
 		    ! ( CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "localPort" ] in SERVICES )) {
 		CONNTRACK[ "direction" ] = "outgoing";
 		CONNTRACK[ "client" ] = CONNTRACK[ "localIP" ];
@@ -745,7 +745,7 @@ BEGIN{
 		CONNTRACK[ "client" ] = CONNTRACK[ "localIP" ];
 		CONNTRACK[ "server" ] = CONNTRACK[ "remoteIP" ];
 		CONNTRACK[ "service" ] = CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "remotePort" ];
-	    } else if ( CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "localPort" ] in SERVICES && CONNTRACK[ "localPort" ] < 2**15 ) {
+	    } else if ( CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "localPort" ] in SERVICES && CONNTRACK[ "localPort" ] < ( Portrange[ 1 ] > 0 ? Portrange[ 1 ] : 32768 ) ) {
 		CONNTRACK[ "direction" ] = "incoming";
 		CONNTRACK[ "client" ] = CONNTRACK[ "remoteIP" ];
 		CONNTRACK[ "server" ] = CONNTRACK[ "localIP" ];
