@@ -30,7 +30,7 @@
 # *_conntrack-file	# if another file beyond /proc/net/nf_conntrack or /proc/net/ip_conntrack or STDIN for netstat-output is to be read
 # 
 # 
-# v2.3 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
+# v2.4 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -63,6 +63,7 @@ BEGIN{
 		LOGFILE = "/dev/stderr";
 	    else if ( LOGFILE == "" )
 		LOGFILE = "/dev/tty";
+	close( "find /dev/stderr" );
 
 	# Define fields in Output and StateFile
 	if ( OutputFormat != "" ) {
@@ -96,6 +97,12 @@ BEGIN{
 		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 			printf( "\n" ) > LOGFILE;
 		    }
+	    } else {
+		if ( ( "find /dev/stdout" | getline i ) > 0 )
+			STATEFILE = "/dev/stdout";
+		    else
+			STATEFILE = "/dev/tty";
+		close( "find /dev/stdout" );
 	    }
 
 	# blacklist local or remote IPs
@@ -775,31 +782,26 @@ END{
 	for ( i=2; OUTPUTFORMAT[i] != ""; i++ )
 		INDEX = INDEX SUBSEP OUTPUTFORMAT[i];
 
-	if ( STATEFILE != "" ) {
-		printf( "#%s\n", INDEX ) > STATEFILE;
-		for ( i in CONNECTIONS )
-			printf( "%s,%s\n", i, CONNECTIONS[i] ) > STATEFILE; 
-		close( STATEFILE );
+	printf( "#%s\n", INDEX ) > STATEFILE;
+	for ( i in CONNECTIONS )
+		printf( "%s,%s\n", i, CONNECTIONS[i] ) > STATEFILE; 
+	close( STATEFILE );
 
-		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-			printf( "#%s\n", INDEX ) > LOGFILE;
-			for ( i in CONNECTIONS )
-				printf( "%s,%s\n", i, CONNECTIONS[i] ) > LOGFILE;
-			close( LOGFILE );
-		    }
-	    } else {
-		printf( "#%s\n", INDEX );
-		for ( i in CONNECTIONS )
-			printf( "%s,%s\n", i, CONNECTIONS[i] );
-		if ( NOWARNINGS != "" && NOWARNINGS != "0" && NOWARNINGS != 0 ) {
-		    } else
-			for ( i in WARNINGS )
-				print i > LOGFILE;
-			close( LOGFILE );
-	    }
 	if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-		system("/usr/bin/lsof -c awk >> " LOGFILE );
+		printf( "#%s\n", INDEX ) > LOGFILE;
+		for ( i in CONNECTIONS )
+			printf( "%s,%s\n", i, CONNECTIONS[i] ) > LOGFILE;
+		close( LOGFILE );
 	    }
+	if ( NOWARNINGS != "" && NOWARNINGS != "0" && NOWARNINGS != 0 ) {
+	    } else
+		for ( i in WARNINGS )
+			print i > LOGFILE;
+
+	if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+		system("/usr/bin/lsof -c awk > " LOGFILE );
+	    }
+	close( LOGFILE );
 
 #	# FixMe: print help if sensible
 #	if ( ARGC < 2 && NR < 1 )
