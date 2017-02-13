@@ -5,7 +5,7 @@
 # 
 # HowTo Use:
 # on Linux:	# see http://www.iptables.info/en/connection-state.html
-#	modprobe nf_conntrack || modprobe ip_conntrack
+#	modprobe nf_conntrack_ipv4 || modprobe ip_conntrack
 #	./bin/ETLcontrack.awk 
 #   or on RHEL[5,6] and compatible systems
 #	netstat -tune --notrim	| awk -f ETLconntrack.awk
@@ -45,7 +45,7 @@
 # -v LOGFILE=$PATH/$FILE.log
 # 
 # 
-# v2.94 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
+# v2.95 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -73,11 +73,11 @@
 BEGIN{
 	SUBSEP = ",";
 	# print ERROR > /dev/stderr" is not portable for HP-UX!
-	if ( LOGFILE == "" && ( "find /dev/stderr" | getline i ) > 0 )
+	if ( LOGFILE == "" && ( "find /dev/stderr 2>/dev/null" | getline i ) > 0 )
 		LOGFILE = "/dev/stderr";
 	    else if ( LOGFILE == "" )
 		LOGFILE = "/dev/tty";
-	close( "find /dev/stderr" );
+	close( "find /dev/stderr 2>/dev/null" );
 
 	# Define fields in Output and StateFile
 	if ( OutputFormat != "" ) {
@@ -102,6 +102,7 @@ BEGIN{
 				srand( SEED % 32767 );
 				system( "sleep " int( 1 + rand() * 4 ) );
 			    }
+			close( "echo $$" );
 		    }
 
 		while (( getline CONNECTION < STATEFILE ) > 0 )
@@ -122,11 +123,11 @@ BEGIN{
 			printf( "\n" ) > LOGFILE;
 		    }
 	    } else {
-		if ( ( "find /dev/stdout" | getline i ) > 0 )
+		if ( ( "find /dev/stdout 2>/dev/null" | getline i ) > 0 )
 			STATEFILE = "/dev/stdout";
 		    else
 			STATEFILE = "/dev/tty";
-		close( "find /dev/stdout" );
+		close( "find /dev/stdout 2>/dev/null" );
 	    }
 
 	# blacklist local or remote IPs
@@ -243,7 +244,7 @@ BEGIN{
 					print i > LOGFILE;
 				printf( "\n" ) > LOGFILE;
 			    }
-		    } else if ( OS == "HP-UX" || OS == "AIX" || OS == "SunOS" ) {
+		    } else if ( OS == "AIX" || OS == "HP-UX" || OS == "SunOS" ) {
 			if (( "find /usr/bin/netstat 2>/dev/null" | getline NETSTAT ) > 0) {
 				#$ netstat -ni
 				#Name      Mtu  Network	 Address	 Ipkts	      Ierrs Opkts	      Oerrs Coll
@@ -252,7 +253,7 @@ BEGIN{
 
 				CMD = NETSTAT " -ni | awk '{ if ( $1 ~ /[0-9]$/ ) print $4;}'"
 				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-					print "Command to figure out IPs: " NETSTAT;
+					print "Command to figure out IPs: " NETSTAT > LOGFILE;
 				    }
 			    } else {
 				print "ERROR: netstat not found!\n   Please provide relevant IP-addresses with parameter '-v IPlist=[...]'\n" > LOGFILE;
@@ -291,8 +292,10 @@ BEGIN{
 #		# FixMe: autogenerate List from /proc/net/protocols
 	    } else {
 		++L4PROTOCOLS[ "tcp" ];
+		++L4PROTOCOLS[ "tcp4" ];
 		++L4PROTOCOLS[ "tcp6" ];
 		++L4PROTOCOLS[ "udp" ];
+		++L4PROTOCOLS[ "udp4" ];
 		++L4PROTOCOLS[ "udp6" ];
 	    }
 
@@ -317,32 +320,53 @@ BEGIN{
 			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 				print "Command to figure out services: " CMD > LOGFILE;
 			    }
+
+			if ( ( getline i < "/proc/sys/net/ipv4/ip_local_port_range" ) > 0 )
+				split( i, Portrange );
+                        close( "/proc/sys/net/ipv4/ip_local_port_range" );
+
 			while (( CMD | getline i) > 0) {
 
-				gsub( /[ ]+/, SUBSEP, i );
-				lastColumn = split( i, Service, SUBSEP );
+				lastColumn = split( i, Service );
+				if ( !( Service[ 1 ] in L4PROTOCOLS ) )
+					continue;
 
-				if ( Service[ 1 ] in L4PROTOCOLS ) {
-					port = Service[ 4 ];
-					sub( /^.*[.:]/, "", port );
-					daemon = Service[ lastColumn -1 ];
+				port = Service[ 4 ];
+				sub( /^.*[.:]/, "", port );
+
+				if ( Service[ 1 ] ~ /^tcp/ && Service[ 7 ] ~ /\// ) {
+					daemon = Service[ 7 ];
 					sub( /[0-9]*\//, "", daemon );
-					SERVICES[ substr( Service[ 1 ], 1, 3 ) "/" port ] = ( daemon != "" ? daemon : "-" );
+					if ( daemon ~ /^[0-9]$/ )
+						continue;
+					sub( /:.*/, "", daemon );
+				    } else if ( Service[ 1 ] ~ /^udp/ && Service[ 6 ] ~ /\// ) {
+					daemon = Service[ 6 ];
+					sub( /[0-9]*\//, "", daemon );
+					sub( /:.*/, "", daemon );
+				    } else
+					daemon = "-";
 
+				if ( !( port >= Portrange[ 1 ] && port <= Portrange[ 2 ] ) ) {
+					sub( /[46]$/, "", Service[ 1 ] );
+					SERVICES[ Service[ 1 ] "/" port ] = daemon;
 				    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+					sub( /[46]$/, "", Service[ 1 ] );
+					SERVICES[ Service[ 1 ] "/" port ] = daemon;
 					print i > LOGFILE;
 				    }
 			    }
 			close( CMD );
 
 		    } else if ( OS == "SunOS" ) {
+			# combined command "netstat -f inet -f inet6 -P ..." is not supported by Solaris < v10
 			CMD = "netstat -f inet -P tcp -an 2>/dev/null | awk '{ print $NF,$1;}'; netstat -f inet6 -P tcp -an 2>/dev/null | awk '{ print $NF,$1;}'"
 			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 				print "Command to figure out services: " CMD > LOGFILE;
 			    }
 			while (( CMD | getline i ) > 0)
 				if ( tolower( i ) ~ /^listen/ && tolower( i ) !~ /^listen 127.0.0.1/ ) {
-					sub( /^.*\./, "", i );
+					sub( /^.*[.]/, "", i );
 					SERVICES[ "tcp/" i ] = ( daemon != "" ? daemon : "-" );
 				    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 #					print i > LOGFILE;
@@ -355,36 +379,38 @@ BEGIN{
 			    }
 			while (( CMD | getline i ) > 0)
 				if ( tolower( i ) ~ /^idle/ && tolower( i ) !~ /^idle 127.0.0.1/ ) {
-					sub( /^.*\./, "", i );
-					SERVICES[ "udp/" substr( i, index( i, "." ) +1 ) ] = ( daemon != "" ? daemon : "-" );
+					sub( /^.*[.]/, "", i );
+					SERVICES[ "udp/" i ] = ( daemon != "" ? daemon : "-" );
 				    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 #					print i > LOGFILE;
 				    }
 			close( CMD );
 
-		    } else if ( OS == "HP-UX" ) {
+		    } else if ( OS == "HP-UX" || OS == "AIX" ) {
 			CMD = "netstat -an -f inet 2>/dev/null | grep -v 'ESTABLISHED'";
 			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 				print "Command to figure out services: " CMD > LOGFILE;
 			    }
 			while (( CMD | getline i) > 0) {
 
-				gsub( /[ ]+/, SUBSEP, i );
-				lastColumn = split( i, Service, SUBSEP );
+				lastColumn = split( i, Service );
 
 				if ( Service[ 1 ] in L4PROTOCOLS && tolower( Service[ lastColumn ] ) == "listen") {
 					port = Service[ 4 ];
 					sub( /^.*[.:]/, "", port );
 					SERVICES[ substr( Service[ 1 ], 1, 3 ) "/" port ] = "-";
 
-				    } else if ( Service[ 1 ] == "udp" && Service[ 5 ] == "*.*" &&	\
-						( Service[ 4 ] ~ /[*][.][0-9]+/ || Service[ 4 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[:.][0-9]+/ ) ) {
+				    } else if ( Service[ 1 ] ~ /^udp/ && Service[ 5 ] == "*.*" &&	\
+						( Service[ 4 ] ~ /[*][.:][0-9]+/ || Service[ 4 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[.:][0-9]+/ ) ) {
 					port = Service[ 4 ];
 					sub( /^.*[.:]/, "", port );
-					SERVICES[ substr( Service[ 1 ], 1, 3 ) "/" port ] = "-";
+
+					sub( /[46]$/, "", Service[ 1 ] );
+
+					SERVICES[ Service[ 1 ] "/" port ] = ( daemon != "" ? daemon : "-" );
 
 				    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-					print i > LOGFILE;
+#					print i > LOGFILE;
 				    }
 			    }
 			close( CMD );
@@ -393,7 +419,7 @@ BEGIN{
 		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 			print CMD > LOGFILE;
 			for ( i in SERVICES )
-				print i > LOGFILE;
+				printf("%s: \t%s\n", i, SERVICES[ i ] ) > LOGFILE;
 			printf( "\n" ) > LOGFILE;
 		    }
 	    }
@@ -436,7 +462,7 @@ BEGIN{
 						    } else
 							exit ERROR = 1;
 					    } else {
-						print "ERROR: Cannot read any conntrack-files!\n   Please modprobe depending on kernel-version either nf_conntrack or ip_conntrack!\n" > LOGFILE;
+						print "ERROR: Cannot read any conntrack-files!\n   Please modprobe depending on kernel-version either nf_conntrack_ipv4 or ip_conntrack!\n" > LOGFILE;
 						if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 						    } else
 							exit ERROR = 1;
@@ -545,13 +571,18 @@ BEGIN{
 
 
 	    } else if ( OS == "Linux" && LINE[ 1 ] ~ /^ipv[46]$/ && LINE[ 3 ] in L4PROTOCOLS ) {
-		# normalize Line wether /proc/net/nf_conntrack or /proc/net/ip_conntrack was read
+
+		if ( tolower( $0 ) ~ /unreplied/ )
+			next;
 
 		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 			++WARNINGS[ "Apparently nf_conntrack..." ];
 		    }
+
+		# normalize Line wether /proc/net/nf_conntrack or /proc/net/ip_conntrack was read
 		CONNTRACK[ "l3proto" ] = LINE[ 1 ];
 		CONNTRACK[ "l4proto" ] = LINE[ 3 ];
+		sub( /[46]$/, "", CONNTRACK[ "l4proto" ] );
 		CONNTRACK[ "persistence" ] = LINE[ 5 ];
 
 		for ( i=6; i<LINEWIDTH; i++ ) {
@@ -566,11 +597,16 @@ BEGIN{
 
 	    } else if ( OS == "Linux" && LINE[ 5 ] ~ /\=/ &&  LINE[ 6 ] ~ /\=/ && LINE[ 1 ] in L4PROTOCOLS ) {
 
+		if ( tolower( $0 ) ~ /unreplied/ )
+			next;
+
 		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 			++WARNINGS[ "Apparently ip_conntrack..." ];
 		    }
+		# normalize Line wether /proc/net/nf_conntrack or /proc/net/ip_conntrack was read
 		CONNTRACK[ "l3proto" ] = "ipv4";
 		CONNTRACK[ "l4proto" ] = LINE[ 1 ];
+		sub( /[46]$/, "", CONNTRACK[ "l4proto" ] );
 		CONNTRACK[ "persistence" ] = LINE[ 3 ];
 
 		for ( i=4; i<LINEWIDTH; i++ ) {
@@ -611,6 +647,7 @@ BEGIN{
 		    else
 			CONNTRACK[ "l3proto" ] = "ipv6";
 		CONNTRACK[ "l4proto" ] = LINE[ 1 ];
+		sub( /[46]$/, "", CONNTRACK[ "l4proto" ] );
 
 		CONNTRACK[ "localPort" ] = LINE[ 4 ];
 		# cleanup "^IP:"
@@ -636,7 +673,6 @@ BEGIN{
 			# cleanup IPv6-Prefix "^::ffff:"
 			sub( /^[:f]+:/, "", CONNTRACK[ "localIP" ] );
 			sub( /^[:f]+:/, "", CONNTRACK[ "remoteIP" ] );
-			sub( /6$/, "", CONNTRACK[ "l4proto" ] );
 
 			for ( i in localIPs )
 				if ( CONNTRACK[ "localIP" ] ~ ( "^" localIPs[ i ] ) ) {
@@ -683,7 +719,12 @@ BEGIN{
 
 	# conjecture direction
 	if ( CONNTRACK[ "direction" ] == "foreign" ) {
-		# FixMe: do something
+		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+			for ( i in CONNTRACK )
+				printf( "%s=%s\n", i, CONNTRACK[i] ) > LOGFILE;
+			printf( "\n" );
+			next;
+		    }
 	    } else if ( CONNTRACK[ "direction" ] == "local" ) {
 		if ( CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "sport" ] in SERVICES ) {
 			CONNTRACK[ "remotePort" ] = CONNTRACK[ "sport" ];
@@ -696,18 +737,24 @@ BEGIN{
 		CONNTRACK[ "server" ] = "localhost";
 		CONNTRACK[ "service" ] = CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "remotePort" ];
 		CONNTRACK[ "localPort" ] = 0;
-	    } else if (! ( CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "localPort" ] in SERVICES )) {
+	    } else if ( ( CONNTRACK[ "remotePort" ] < 1024 && CONNTRACK[ "localPort" ] > ( Portrange[ 1 ] > 0 ? Portrange[ 1 ] : CONNTRACK[ "remotePort" ] ) ) ||	\
+		    ! ( CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "localPort" ] in SERVICES )) {
 		CONNTRACK[ "direction" ] = "outgoing";
 		CONNTRACK[ "client" ] = CONNTRACK[ "localIP" ];
 		CONNTRACK[ "server" ] = CONNTRACK[ "remoteIP" ];
 		CONNTRACK[ "service" ] = CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "remotePort" ];
 		CONNTRACK[ "localPort" ] = 0;
+		if ( CONNTRACK[ "localPort" ] > ( Portrange[ 1 ] > 0 ? Portrange[ 1 ] : CONNTRACK[ "remotePort" ] )&& ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) ) {
+			for ( i in CONNTRACK )
+				printf( "%s=%s\n", i, CONNTRACK[i] ) > LOGFILE;
+			printf( "\n" );
+		    }
 	    } else if ( CONNTRACK[ "localPort" ] == CONNTRACK[ "remotePort" ] ) {
 		CONNTRACK[ "direction" ] = "peer2peer";
 		CONNTRACK[ "client" ] = CONNTRACK[ "localIP" ];
 		CONNTRACK[ "server" ] = CONNTRACK[ "remoteIP" ];
 		CONNTRACK[ "service" ] = CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "remotePort" ];
-	    } else if ( CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "localPort" ] in SERVICES ) {
+	    } else if ( CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "localPort" ] in SERVICES && CONNTRACK[ "localPort" ] < ( Portrange[ 1 ] > 0 ? Portrange[ 1 ] : 32768 ) ) {
 		CONNTRACK[ "direction" ] = "incoming";
 		CONNTRACK[ "client" ] = CONNTRACK[ "remoteIP" ];
 		CONNTRACK[ "server" ] = CONNTRACK[ "localIP" ];
@@ -779,7 +826,7 @@ END{
 	close( LOGFILE );
 
 	if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 )
-		system("ps -o ppid= -p $$ | xargs lsof -p >> " LOGFILE );
+		system("ps -o ppid= -p $$ 2>/dev/null | xargs lsof -p 2>/dev/null >>" LOGFILE );
 
 #	# FixMe: print help if sensible
 #	if ( ARGC < 2 && NR < 1 )
