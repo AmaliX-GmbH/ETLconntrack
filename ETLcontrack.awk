@@ -1,13 +1,16 @@
 #!/usr/bin/awk -f
 # 
+# 
 # ETLconntrack.awk: log data of current connections for defining communication-matrices
 # 
 # HowTo Use:
 # on Linux:	# see http://www.iptables.info/en/connection-state.html
 #	modprobe nf_conntrack || modprobe ip_conntrack
 #	./bin/ETLcontrack.awk 
-#   or
-#	netstat -tune [--notrim|--wide] | awk -f ETLconntrack.awk
+#   or on RHEL[5,6] and compatible systems
+#	netstat -tune --notrim	| awk -f ETLconntrack.awk
+#   or on Debian and compatible systems
+#	netstat -tune --wide	| awk -f ETLconntrack.awk
 # 
 # on SunOS:
 #	netstat -n -f inet -f inet6 | /usr/local/bin/gawk -f ETLconntrack.awk
@@ -20,20 +23,20 @@
 # on HP-UX:
 #	netstat -an -f inet | awk -f ETLconntrack.awk
 # 
+# 
 # accepted parameters:
 # -v STATEFILE=$PATH/$FILE.csv 
 # -v OutputFormat="service,direction,localIP,remoteIP,counter"
 # -v localIPlist="10.119.146.19 10.110.7.244"
 # -v IPblacklist="127.0.0.1 192.168.49.1"
 # -v PORTblacklist="22 111 2048 2049"
-# -v Services="udp/123"	# NOT to be used beyond special circumstances!
 # -v HOSTNAME="myname"	# NOT to be used beyond special circumstances!
 # -v LOGFILE=$PATH/$FILE.log
 # -v NOWARNINGS=1
 # *_conntrack-file	# if another file beyond /proc/net/nf_conntrack or /proc/net/ip_conntrack or STDIN for netstat-output is to be read
 # 
 # 
-# v2.92 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
+# v2.93 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -67,10 +70,6 @@ BEGIN{
 		LOGFILE = "/dev/tty";
 	close( "find /dev/stderr" );
 
-	# sleep for up to four seconds to distribute load on virtual systems
-	srand();
-	system( "sleep " systime() % 4 + int( 1 + rand() * 4 ) );
-
 	# Define fields in Output and StateFile
 	if ( OutputFormat != "" ) {
 		if ( OutputFormat ~ SUBSEP )
@@ -86,6 +85,16 @@ BEGIN{
 
 	# read StateFile
 	if ( STATEFILE != "" ) {
+
+		# sleep for up to four seconds to distribute load on virtual systems
+		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+		    } else {
+			if (( "echo $$" | getline SEED ) > 0 && SEED > 0 ) {
+				srand( SEED % 32767 );
+				system( "sleep " int( 1 + rand() * 4 ) );
+			    }
+		    }
+
 		while (( getline CONNECTION < STATEFILE ) > 0 )
 			if ( CONNECTION !~ /^#/ ) {
 				split( CONNECTION, LINE, SUBSEP );
@@ -778,21 +787,19 @@ END{
 		printf( "%s,%s\n", i, ( CONNECTIONS[i] > SAVEDCONNECTIONS[i] ? CONNECTIONS[i] : SAVEDCONNECTIONS[i] ) ) > STATEFILE; 
 	close( STATEFILE );
 
-	if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-		printf( "#%s\n", INDEX ) > LOGFILE;
-		for ( i in CONNECTIONS )
-			printf( "%s,%d,%d\n", i, CONNECTIONS[i], SAVEDCONNECTIONS[i] ) > LOGFILE;
-		close( LOGFILE );
-	    }
 	if ( NOWARNINGS != "" && NOWARNINGS != "0" && NOWARNINGS != 0 ) {
 	    } else
 		for ( i in WARNINGS )
 			print i > LOGFILE;
-
 	if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-		system("/usr/bin/lsof -c awk > " LOGFILE );
+		printf( "#%s\n", INDEX ) > LOGFILE;
+		for ( i in CONNECTIONS )
+			printf( "%s,%d,%d\n", i, CONNECTIONS[i], SAVEDCONNECTIONS[i] ) > LOGFILE;
 	    }
 	close( LOGFILE );
+
+	if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 )
+		system("ps -o ppid= -p $$ | xargs lsof -p >> " LOGFILE );
 
 #	# FixMe: print help if sensible
 #	if ( ARGC < 2 && NR < 1 )
