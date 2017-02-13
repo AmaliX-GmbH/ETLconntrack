@@ -27,6 +27,7 @@
 #	netstat -an | awk -f ETLconntrack.awk
 # You need awk.exe, tty.exe and uname.exe as well as dependencies libiconv2.dll and libintl3.dll,
 # all can be found as packages gawk and coreutils on https://sourceforge.net/projects/gnuwin32/
+# Current state of supporting windows is only proof-of-concept - more to come.
 # 
 # parameters considered to be used frequently
 # -v STATEFILE=$PATH/$FILE.csv 
@@ -50,7 +51,7 @@
 # -v LOGFILE=$PATH/$FILE.log
 # 
 # 
-# v2.99 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
+# v3.0 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -71,21 +72,19 @@
 # FixMe: netstat never shows any UDP-communication
 # FixMe: only accurate regarding UDP on modern Linux >v2.4 by using kernel-module for connection-tracking
 # FixMe: netstat shows listening daemons only on Linux, and only if running with root-privileges || maybe daemon = "lsof -nPi :$PORT"
+# FixMe: current state of supporting windows is only proof-of-concept.
+# FixMe: Skript needs to be refactured / modularized to calling functions
 # 
 # feel free to ask for further customization
 # 
 
-function IPhex( IP,     quad ){
-	split( IP, quad, "[/.]" );
-	return sprintf( "%#010x", quad[ 1 ] * 2^24 + quad[ 2 ] * 2^16 + quad[ 3 ] * 2^8 + quad[ 4 ]);
-    }
-function replace( SEARCH, REPLACEMENT, TARGET ){
-	gsub( SEARCH, REPLACEMENT, TARGET );
-	return TARGET;
-    }
-
 BEGIN{
 	SUBSEP = ",";
+	if (( OS == "" ) && !( "uname -s" | getline OS ) > 0 ) {
+		print "uname not found, please check dependencies and PATH!"
+		exit ERROR=1;
+	    }
+
 	# print ERROR > /dev/stderr" is not portable for HP-UX nor for windows32!
 	if ( LOGFILE == "" )
 		if ( ( "find /dev/stderr 2>/dev/null" | getline i ) > 0 )
@@ -143,9 +142,9 @@ BEGIN{
 	    } else {
 		if ( ( "find /dev/stdout 2>/dev/null" | getline i ) > 0 )
 			STATEFILE = "/dev/stdout";
-		    else if ( ( "find /dev/tty 2>/dev/null" | getline i ) > 0 )
+		else if ( ( "find /dev/tty 2>/dev/null" | getline i ) > 0 )
 			STATEFILE = "/dev/tty";
-		    else
+		else
 			STATEFILE = "CON";
 		close( "find /dev/stdout 2>/dev/null" );
 		close( "find /dev/tty 2>/dev/null" );
@@ -204,7 +203,7 @@ BEGIN{
 	    }
 
 	#
-	if (( OS == "" ) && ( "uname -s" | getline OS ) > 0 && ( OS != "Linux" && OS != "SunOS" && OS != "HP-UX" && OS != "AIX" && OS != "windows32" )) {
+	if (( OS != "Linux" && OS != "SunOS" && OS != "HP-UX" && OS != "AIX" && OS != "windows32" )) {
 		print "ERROR: Unknown OS \"" OS "\"!\n   Please gather netstat-data manually and run skript on supported awk-version.\n" > LOGFILE;
 		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) { 
 		    } else
@@ -455,7 +454,7 @@ BEGIN{
 		    }
 
 		CMD = ( OS != "windows32" ? "LC_ALL=C tty" : "tty" );
-		if (( CMD | getline STDIN ) > 0 && STDIN ~ /\// ) {
+		if (( CMD | getline STDIN ) > 0 && STDIN ~ /\// || STDIN == "CON" ) {
 			# STDIN is a tty, no conntrack-data is to be read from it
 
 			close( CMD );
@@ -544,7 +543,7 @@ BEGIN{
 		    }
 	    }
 
-	if ( NoFileArgs + UnreadableFiles > ARGC - 1 || ( ARGC == 1 && ( STDIN ~ /\// || STDIN == "CON" ) ) ) {
+	if ( NoFileArgs + UnreadableFiles > ARGC - 1 || ( ARGC == 1 && ( STDIN ~ /\// ) ) ) {
 		print "ERROR: Cannot read any files listed on commandline!\n   Please check arguments!" > LOGFILE;
 		exit ERROR = 1;
 	    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
@@ -552,6 +551,14 @@ BEGIN{
 	    }
     }
 
+function IPhex( IP,     quad ){
+	split( IP, quad, "[/.]" );
+	return sprintf( "%#010x", quad[ 1 ] * 2^24 + quad[ 2 ] * 2^16 + quad[ 3 ] * 2^8 + quad[ 4 ]);
+    }
+function replace( SEARCH, REPLACEMENT, TARGET ){
+	gsub( SEARCH, REPLACEMENT, TARGET );
+	return TARGET;
+    }
 
 #main()
 {
@@ -571,7 +578,7 @@ BEGIN{
 		CONNTRACK[ "persistence" ] = LINE[ 5 ];
 
 		for ( i=6; i<LINEWIDTH; i++ ) {
-			if ( LINE[i] !~ /=/ )
+			if ( index( LINE[i], "=" ) == 0 )
 				continue;
 			    else {
 				split( LINE[i], ENTRY, "=" );
@@ -595,7 +602,7 @@ BEGIN{
 		CONNTRACK[ "persistence" ] = LINE[ 3 ];
 
 		for ( i=4; i<LINEWIDTH; i++ ) {
-			if ( LINE[i] !~ /=/ )
+			if ( index( LINE[i], "=" ) == 0 )
 				continue;
 			    else {
 				split( LINE[i], ENTRY, "=" );
