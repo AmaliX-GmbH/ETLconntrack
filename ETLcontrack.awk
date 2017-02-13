@@ -23,10 +23,12 @@ BEGIN {
 				split( i, DBROW, SUBSEP );
 				# cap maxcount at some arbitrary number as e.g. 1440
 				CONNECTIONS[DBROW[1],DBROW[2],DBROW[3],DBROW[4],DBROW[5],DBROW[6]]=( DBROW[7] > 24*60 ? 24*60 : DBROW[7] );
-			    } else if ( DEBUG != 0 || DEBUG != "" ) {
-				printf( "%s\n", i )
+				if ( DEBUG != 0 || DEBUG != "" )
+					printf( "%s\n", i );
 			    }
-		close( STATEFILE )
+		close( STATEFILE );
+		if ( DEBUG != 0 || DEBUG != "" )
+			printf("\n");
 	    }
 
 	# blacklist local or remote IPs
@@ -35,12 +37,16 @@ BEGIN {
 			split( IPblacklist, blackIPs, "," );
 		    else
 			split( IPblacklist, blackIPs );
+		# transponate values to indices for easier searching
 		for ( i in blackIPs ) {
 			blackIPs[blackIPs[i]]=i;
 			delete blackIPs[i];
 		    }
-	    } else
-		++blackIPs["127.0.0.1"]
+	    } else if ( DEBUG != 0 || DEBUG != "" ) {
+		    split( "", blackIPs );
+	    } else {
+		++blackIPs["127.0.0.1"];
+	    }
 
 	# blacklist local or remote Ports
 	if ( PORTblacklist != "" ) {
@@ -48,14 +54,25 @@ BEGIN {
 			split( PORTblacklist, blackPORTs, "," );
 		    else
 			split( PORTblacklist, blackPORTs );
+		# transponate values to indices for easier searching
 		for ( i in blackPORTs ) {
 			blackPORTs[blackPORTs[i]]=i;
 			delete blackPORTs[i];
 		    }
+	    } else if ( DEBUG != 0 || DEBUG != "" ) {
+		    split( "", blackPORTs );
 	    } else {
 		++blackPORTs["53"]
 		++blackPORTs["123"]
 	    }
+
+	CMD=" id -u ";
+	if (( CMD | getline UID ) > 0 && UID>0 ) {
+		print "\n  Skript must be run as root!\n" > "/dev/stderr";
+		if (! ( DEBUG != 0 || DEBUG != "" ))
+			exit EXIT=1;
+	    }
+	close( CMD );
 
 	if ( IPwhitelist != "" ) {
 		# only specific IPs are to be analyzed
@@ -63,16 +80,33 @@ BEGIN {
 			split( IPwhitelist, IPs, "," );
 		    else
 			split( IPwhitelist, IPs );
+		# transponate values to indices for easier searching
 		for ( i in IPs ) {
 			IPs[IPs[i]]=i;
+			delete blackIPs[IPs[i]];
 			delete IPs[i];
 		    }
 	    } else {
 		# any of local and remote IPs are to be analyzed
-		CMD=" ip -4 -o a s | awk '{ print $4}' | cut -d '/' -f 1 "
-		while (( CMD | getline i ) > 0)
+		if (( "type ip 2>/dev/null" | getline junk ) > 0) {
+			CMD=" ip -4 -o a s 2>/dev/null | awk '{ print $4}' | cut -d '/' -f 1 ";
+		    } else if (( "type ifconfig 2>/dev/null" | getline junk ) > 0) {
+			CMD=" ifconfig -a | awk 'sub(/inet addr:/,\"\"){print $1}' ";
+		    } else {
+			print "\n  Neither ip nor ifconfig found!\n  Please provide IPs with parameter '-v IPwhitelist=[...]'\n" > "/dev/stderr";
+			if (! ( DEBUG != 0 || DEBUG != "" ))
+				exit EXIT=1;
+		    }
+		while ( ( CMD | getline i ) > 0 && junk != "" )
 			++IPs[i];
-		close( CMD )
+		close( CMD );
+		close( "type ip 2>/dev/null" );
+		close( "type ifconfig 2>/dev/null" );
+
+		if ( DEBUG != 0 || DEBUG != "" ) {
+			for ( i in IPs ) print i;
+			printf("\n");
+		    }
 	    }
 
 	# 
@@ -83,16 +117,17 @@ BEGIN {
 			split( TCPlisten, TCPPORTS, "," );
 		    else
 			split( TCPlisten, TCPPORTS );
+		# transponate values to indices for easier searching
 		for ( i in TCPPORTS ) {
 			TCPPORTS[TCPPORTS[i]]=i;
 			delete TCPPORTS[i];
 		    }
 	    } else {
 		# autogenerate list of listening tcpports
-		CMD=" netstat -tln | awk '$1==\"tcp\" {print $4}' | awk -F '[.:]' '{print $NF}' "
+		CMD=" netstat -tln | awk '$1~/^tcp/ {print $4}' | awk -F '[.:]' '{print $NF}' ";
 		while (( CMD | getline i ) > 0)
 			++TCPPORTS[i];
-		close( CMD )
+		close( CMD );
 	    }
 
 	if ( UDPlisten != "" ) {
@@ -102,27 +137,22 @@ BEGIN {
 			split( UDPlisten, UDPPORTS, "," );
 		    else
 			split( UDPlisten, UDPPORTS );
+		# transponate values to indices for easier searching
 		for ( i in UDPPORTS ) {
 			UDPPORTS[UDPPORTS[i]]=i;
 			delete UDPPORTS[i];
 		    }
 	    } else {
 		# autogenerate list of listening udpports
-		CMD=" netstat -uln | awk '$1==\"udp\" {print $4}' | awk -F '[.:]' '{print $NF}' "
+		CMD=" netstat -uln | awk '$1~/^udp/ {print $4}' | awk -F '[.:]' '{print $NF}' ";
 		while (( CMD | getline i ) > 0)
 			++UDPPORTS[i];
-		close( CMD )
+		close( CMD );
 	    }
 
-	CMD=" id -u "
-	if (( CMD | getline UID ) > 0 && UID>0 ) {
-		print "Skript must be run as root!" > "/dev/stderr";
-		exit 1;
-	    }
-	close( CMD )
 
 	# if input-stream is not to be read from STDIN
-	CMD="file -L /dev/stdin"
+	CMD="file -L /dev/stdin";
 	if (( CMD | getline STDIN ) > 0 && ( STDIN !~ /fifo/ && STDIN !~ /pipe/ ) ) {
 		if ( ARGC==1 ) {
 			# not any input-files was provided on commandline
@@ -136,8 +166,9 @@ BEGIN {
 				ARGV[1]="/proc/net/nf_conntrack";
 				close ("/proc/net/nf_conntrack");
 			    } else {
-				print "Cannot read any conntrack-files! Please modprobe either ip_conntrack or nf_conntrack" > "/dev/stderr"
-				exit 1;
+				print "\n  Cannot read any conntrack-files!\n  Please modprobe depending on kernel-version either ip_conntrack or nf_conntrack!\n  Press <CTRL>+<c> to cancel command!\n" > "/dev/stderr"
+				if (! ( DEBUG != 0 || DEBUG != "" ))
+					exit EXIT=1;
 			    }
 		    } else for (i = 1; i < ARGC; i++) {
 			# at least something was provided on commandline
@@ -145,7 +176,7 @@ BEGIN {
 			if (ARGV[i] ~ /^[a-zA-Z_][a-zA-Z0-9_]*=.*/ || ARGV[i] ~ /^-/ || ARGV[i] == "/dev/stdin")
 				continue    # assignment or standard input
 			    else if ((getline junk < ARGV[i]) < 0) {
-				printf("%s/%s: %s unreadable!\n",i,ARGC,ARGV[i]) > "/dev/stderr"
+				printf("%s/%s: %s unreadable!\n",i,ARGC-1,ARGV[i]) > "/dev/stderr"
 				close(ARGV[i])
 				delete ARGV[i]
 			    } else
@@ -153,7 +184,7 @@ BEGIN {
 			# MISSING FEATURE: exit with error if none of the input-files is readable
 		    }
 	    }
-	close( CMD )
+	close( CMD );
     }
 
 
@@ -203,7 +234,14 @@ BEGIN {
 	if ( CONNTRACK["src"] in blackIPs || CONNTRACK["dst"] in blackIPs )
 		next;
 	    else if ( ( CONNTRACK["src"] in IPs ) && ( CONNTRACK["dst"] in IPs ) )
-		next;
+		if ( DEBUG != 0 || DEBUG != "" ) {
+			CONNTRACK["direction"]="local";
+			CONNTRACK["local"]=CONNTRACK["dst"];
+			CONNTRACK["lport"]=CONNTRACK["sport"];
+			CONNTRACK["remote"]=CONNTRACK["dst"];
+			CONNTRACK["rport"]=CONNTRACK["dport"];
+		    } else
+			next;
 	    else if ( ( CONNTRACK["src"] in IPs ) && (! ( CONNTRACK["dst"] in IPs )) ) {
 		CONNTRACK["local"]=CONNTRACK["src"];
 		CONNTRACK["lport"]=CONNTRACK["sport"];
@@ -232,23 +270,29 @@ BEGIN {
 		next;
 	    else if ( "tcp" in CONNTRACK ) {
 		if (! ( CONNTRACK["lport"] in TCPPORTS )) {
-			CONNTRACK["direction"]="outgoing";
+			if (! ( "direction" in CONNTRACK ))
+				CONNTRACK["direction"]="outgoing";
 			delete CONNTRACK["lport"];
 		    } else if ( CONNTRACK["lport"]==CONNTRACK["rport"] ) {
-			CONNTRACK["direction"]="bidirectional";
+			if (! ( "direction" in CONNTRACK ))
+				CONNTRACK["direction"]="bidirectional";
 		    } else if ( CONNTRACK["lport"] in TCPPORTS ) {
-			CONNTRACK["direction"]="incoming";
+			if (! ( "direction" in CONNTRACK ))
+				CONNTRACK["direction"]="incoming";
 			delete CONNTRACK["rport"];
 		    } else
 			next;
 	    } else if ( "udp" in CONNTRACK ) {
 		if (! ( CONNTRACK["lport"] in UDPPORTS )) {
-			CONNTRACK["direction"]="outgoing";
+			if (! ( "direction" in CONNTRACK ))
+				CONNTRACK["direction"]="outgoing";
 			delete CONNTRACK["lport"];
 		    } else if ( CONNTRACK["lport"]==CONNTRACK["rport"] ) {
-			CONNTRACK["direction"]="bidirectional";
+			if (! ( "direction" in CONNTRACK ))
+				CONNTRACK["direction"]="bidirectional";
 		    } else if ( CONNTRACK["lport"] in UDPPORTS ) {
-			CONNTRACK["direction"]="incoming";
+			if (! ( "direction" in CONNTRACK ))
+				CONNTRACK["direction"]="incoming";
 			delete CONNTRACK["rport"];
 		    } else
 			next;
@@ -261,10 +305,10 @@ BEGIN {
 		next;
 
 	if ( "tcp" in CONNTRACK ) {
-		if ( (! (CONNTRACK["direction"],"tcp",CONNTRACK["local"],CONNTRACK["lport"],CONNTRACK["remote"],CONNTRACK["rport"]) in CONNECTIONS ) || CONNTRACK["persistence"]<60 ) 
+		if ( CONNTRACK["persistence"]<60 || CONNECTIONS[CONNTRACK["direction"],"tcp",CONNTRACK["local"],CONNTRACK["lport"],CONNTRACK["remote"],CONNTRACK["rport"]] == 0 )
 			++CONNECTIONS[CONNTRACK["direction"],"tcp",CONNTRACK["local"],CONNTRACK["lport"],CONNTRACK["remote"],CONNTRACK["rport"]];
 	    } else if ( "udp" in CONNTRACK ) {
-		if ( (! (CONNTRACK["direction"],"udp",CONNTRACK["local"],CONNTRACK["lport"],CONNTRACK["remote"],CONNTRACK["rport"]) in CONNECTIONS ) || CONNTRACK["persistence"]<60 ) 
+		if ( CONNTRACK["persistence"]<60 || CONNECTIONS[CONNTRACK["direction"],"udp",CONNTRACK["local"],CONNTRACK["lport"],CONNTRACK["remote"],CONNTRACK["rport"]] == 0 )
 			++CONNECTIONS[CONNTRACK["direction"],"udp",CONNTRACK["local"],CONNTRACK["lport"],CONNTRACK["remote"],CONNTRACK["rport"]];
 	    } else if ( DEBUG != 0 || DEBUG != "" ) {
 		for (i in CONNTRACK)
@@ -276,13 +320,17 @@ BEGIN {
 
 END {
 	if ( STATEFILE != "" ) {
-		printf("#%s,%s,%s,%s,%s,%s,%s\n","direction","protocol","localIP","localPort","remoteIP","remotePort","counter") > STATEFILE; 
+		if (! ( EXIT != 0 || EXIT != "" ))
+			printf("#%s,%s,%s,%s,%s,%s,%s\n","direction","protocol","localIP","localPort","remoteIP","remotePort","counter") > STATEFILE; 
 		for (i in CONNECTIONS)
-			printf("%s,%s\n",i,CONNECTIONS[i]) > STATEFILE; 
+			if ( CONNECTIONS[i] > 0 )
+				printf("%s,%s\n",i,CONNECTIONS[i]) > STATEFILE; 
 	    } else {
-		printf("#%s,%s,%s,%s,%s,%s,%s\n","direction","protocol","localIP","localPort","remoteIP","remotePort","counter")
+		if (! ( EXIT != 0 || EXIT != "" ))
+			printf("#%s,%s,%s,%s,%s,%s,%s\n","direction","protocol","localIP","localPort","remoteIP","remotePort","counter")
 		for (i in CONNECTIONS)
-			printf("%s,%s\n",i,CONNECTIONS[i]);
+			if ( CONNECTIONS[i] > 0 )
+				printf("%s,%s\n",i,CONNECTIONS[i]);
 	    }
 #	if ( ARGC<2 && NR<1 )
 #		print HELP;
