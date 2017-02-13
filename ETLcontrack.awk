@@ -1,8 +1,9 @@
 #!/usr/bin/awk -f
+#
+# see http://www.iptables.info/en/connection-state.html
 # 
 # HowTi Use:
-# on Linux: [see http://www.iptables.info/en/connection-state.html]
-#	modprobe nf_conntrack || modprobe ip_conntrack
+# on Linux:
 #	./bin/ETLcontrack.awk 
 # or
 #	netstat -tune --notrim | awk -f bin/ETLconntrack.awk
@@ -12,42 +13,26 @@
 #	netstat -an -f inet | awk -f bin/ETLconntrack.awk
 # 
 # accepted parameters:
-# -v STATEFILE=$PATH/$FILE.csv 
 # -v OutputFormat="service,direction,localIP,remoteIP,counter"
+# -v STATEFILE=$PATH/$FILE.csv 
+# -v LOGFILE=$PATH/$FILE.log
 # -v IPblacklist="127.0.0.1 192.168.49.1"
 # -v IPwhitelist="10.119.146.19 10.110.7.244"
 # -v PORTblacklist="22 111 2048 2049"
 # -v Services="udp/123"	NOT to be used beyond special circumstances!
 # -v HOSTNAME="myname"	NOT to be used beyond special circumstances!
-# -v LOGFILE=$PATH/$FILE.log
+# -v DEBUG=1
 # -v NOWARNINGS=1
-# *_conntrack-file	[if another file beyond /proc/net/ip_conntrack or /proc/net/nf_conntrack is to be read]
+# *_conntrack-file	if another file beyond /proc/net/ip_conntrack or /proc/net/nf_conntrack is to be read
 # 
-# 
-# Copyright (C) 2016,2017	Henning Rohde (HeRo@amalix.de)
-# 
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-# 
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-# 
-# You should have received a copy of the GNU General Public License
-# along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
-#  
+# (C) 2016 by Henning Rohde, hero@amalix.de
+# feel free to ask for further customization
 # 
 # FixMe: No IPv6 yet
 # FixMe: netstat never shows any UDP-communication
 # FixMe: only accurate regarding UDP on modern Linux >v2.4 by using kernel-module for connection-tracking
-# FixMe: netstat on SunOS shows only established TCP-connections || maybe "lsof -nPi"
-# FixMe: netstat shows listening daemon only on Linux, and only if running with root-privileges || maybe daemon = "lsof -nPi :$PORT"
-# 
-# feel free to ask for further customization
+# FixMe: netstat on SunOS shows only established TCP-connections || maybe "lsof -lnPi"
+# FixMe: netstat shows listening daemon only on Linux, and only if running with root-privileges || maybe daemon = "lsof -lnPi :$PORT"
 # 
 
 BEGIN{
@@ -339,38 +324,76 @@ BEGIN{
 					SERVICES[ substr( Service[ 1 ], 1, 3 ) "/" port ] = ( daemon != "" ? daemon : "-" );
 
 				    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-					print i > LOGFILE;
+#					print i > LOGFILE;
 				    }
 			    }
 			close( CMD );
 
 		    } else if ( OS == "SunOS" ) {
-			CMD = "netstat -f inet -f inet6 -P tcp -an 2>/dev/null | awk '{ print $NF,$1;}'"
-			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-				print "Command to figure out services: " CMD > LOGFILE;
-			    }
-			while (( CMD | getline i ) > 0)
-				if ( tolower( i ) ~ /^listen/ && tolower( i ) !~ /^listen 127.0.0.1/ ) {
-					sub( /^.*\./, "", i );
-					SERVICES[ "tcp/" i ] = ( daemon != "" ? daemon : "-" );
-				    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-#					print i > LOGFILE;
-				    }
-			close( CMD );
+#			disabling lsof to gather running services because lsof is not able to display detailed data
+#	COMMAND     PID     USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+#	inetd       429        0   22u  IPv4                              TCP no TCP/UDP/IP information available
+#	inetd       429        0   25u  IPv4                              TCP no TCP/UDP/IP information available
+#	inetd       429        0   26u  IPv4                              TCP no TCP/UDP/IP information available
+#	[...]
+#
+#			# check priviledge because lsof needs root-privileges
+#			if (( "/usr/xpg4/bin/id -u 2>/dev/null" | getline UID ) > 0 && UID == 0 && ( "type lsof 2>/dev/null" | getline LSOF ) > 0 ) {
+#				close ( "/usr/xpg4/bin/id -u 2>/dev/null" );
+#				close ( "type lsof 2>/dev/null" );
+#
+#				CMD = "lsof -lnPi 2>/dev/null | grep -v '[-][>]'"
+#				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+#					print "Command to figure out services: " CMD > LOGFILE;
+#				    }
+#				while (( CMD | getline i ) > 0) {
+#
+#					gsub( /[ ]+/, SUBSEP, i );
+#					lastColumn = split( i, Service, SUBSEP );
+#
+#					if ( tolower( Service[ 7 ] ) in L4PROTOCOLS && $8 ~ /[.:][0-9]+$/ ) {
+#						port = Service[ 9 ];
+#						sub( /^.*[.:]/, "", port );
+#						daemon = Service[ 1 ];
+#						SERVICES[ tolower( Service[ 7 ] ) "/" port ] = ( daemon != "" ? daemon : "-" );
+#
+#					    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+##						print i > LOGFILE;
+#					    }
+#				    }
+#				close( CMD );
+#
+#			    } else {
+				close ( "id -u 2>/dev/null" );
+				close ( "type lsof 2>/dev/null" );
 
-			# FixMe: UDP - netstat -p udp has no output
-			CMD = "netstat -f inet -f inet6 -P udp -an 2>/dev/null | awk '{ print $NF,$1;}'"
-			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-				print "Command to figure out services: " CMD > LOGFILE;
-			    }
-			while (( CMD | getline i ) > 0)
-				if ( tolower( i ) ~ /^idle/ && tolower( i ) !~ /^idle 127.0.0.1/ ) {
-					sub( /^.*\./, "", i );
-					SERVICES[ "udp/" substr( i, index( i, "." ) +1 ) ] = ( daemon != "" ? daemon : "-" );
-				    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-#					print i > LOGFILE;
+				CMD = "netstat -f inet -f inet6 -P tcp -an 2>/dev/null | awk '{ print $NF,$1;}'"
+				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+					print "Command to figure out services: " CMD > LOGFILE;
 				    }
-			close( CMD );
+				while (( CMD | getline i ) > 0)
+					if ( tolower( i ) ~ /^listen/ && tolower( i ) !~ /^listen 127.0.0.1/ ) {
+						sub( /^.*\./, "", i );
+						SERVICES[ "tcp/" i ] = ( daemon != "" ? daemon : "-" );
+					    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+#						print i > LOGFILE;
+					    }
+				close( CMD );
+
+				# FixMe: UDP - netstat -p udp has no output
+				CMD = "netstat -f inet -f inet6 -P udp -an 2>/dev/null | awk '{ print $NF,$1;}'"
+				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+					print "Command to figure out services: " CMD > LOGFILE;
+				    }
+				while (( CMD | getline i ) > 0)
+					if ( tolower( i ) ~ /^idle/ && tolower( i ) !~ /^idle 127.0.0.1/ ) {
+						sub( /^.*\./, "", i );
+						SERVICES[ "udp/" substr( i, index( i, "." ) +1 ) ] = ( daemon != "" ? daemon : "-" );
+					    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+#						print i > LOGFILE;
+					    }
+				close( CMD );
+#			    }
 
 		    } else if ( OS == "HP-UX" ) {
 			CMD = "netstat -an -f inet 2>/dev/null | grep -v 'ESTABLISHED'";
