@@ -13,6 +13,9 @@
 #	netstat -n -f inet -f inet6 | /usr/local/bin/gawk -f ETLconntrack.awk
 #   or
 #	netstat -n -f inet -f inet6 | /usr/xpg4/bin/awk -f ETLconntrack.awk
+#   or on ancient versions like Solaris v8:
+#	( netstat -n -f inet; netstat -n -f inet6 ) |	\
+#	> /usr/xpg4/bin/awk -f ETLconntrack.awk
 # 
 # on HP-UX:
 #	netstat -an -f inet | awk -f ETLconntrack.awk
@@ -20,8 +23,8 @@
 # accepted parameters:
 # -v STATEFILE=$PATH/$FILE.csv 
 # -v OutputFormat="service,direction,localIP,remoteIP,counter"
+# -v localIPlist="10.119.146.19 10.110.7.244"
 # -v IPblacklist="127.0.0.1 192.168.49.1"
-# -v IPwhitelist="10.119.146.19 10.110.7.244"
 # -v PORTblacklist="22 111 2048 2049"
 # -v Services="udp/123"	# NOT to be used beyond special circumstances!
 # -v HOSTNAME="myname"	# NOT to be used beyond special circumstances!
@@ -30,7 +33,7 @@
 # *_conntrack-file	# if another file beyond /proc/net/nf_conntrack or /proc/net/ip_conntrack or STDIN for netstat-output is to be read
 # 
 # 
-# v2.5 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
+# v2.9 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -50,8 +53,7 @@
 # FixMe: No IPv6 yet
 # FixMe: netstat never shows any UDP-communication
 # FixMe: only accurate regarding UDP on modern Linux >v2.4 by using kernel-module for connection-tracking
-# FixMe: netstat on SunOS shows only established TCP-connections || maybe "lsof -nPi"
-# FixMe: netstat shows listening daemon only on Linux, and only if running with root-privileges || maybe daemon = "lsof -nPi :$PORT"
+# FixMe: netstat shows listening daemons only on Linux, and only if running with root-privileges || maybe daemon = "lsof -nPi :$PORT"
 # 
 # feel free to ask for further customization
 # 
@@ -92,9 +94,9 @@ BEGIN{
 					CONNINDEX = CONNINDEX SUBSEP LINE[i];
 				COUNTER = LINE[i];
 				# cap maxcount at some arbitrary number as e.g. 1440
-				CONNECTIONS[ CONNINDEX ] = ( COUNTER > 24*60 ? 24*60 : COUNTER );
+				SAVEDCONNECTIONS[ CONNINDEX ] = ( COUNTER > 24*60 ? 24*60 : COUNTER );
 				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-					printf( "%s = %s\n", CONNINDEX, CONNECTIONS[ CONNINDEX ] ) > LOGFILE;
+					printf( "%s = %s\n", CONNINDEX, SAVEDCONNECTIONS[ CONNINDEX ] ) > LOGFILE;
 				    }
 			    }
 		close( STATEFILE );
@@ -124,18 +126,18 @@ BEGIN{
 		split( "", IPBLACKLIST );
 	    } else {
 		IPBLACKLIST[ "127.0.0.1"   ]	= "localhost";
-		IPBLACKLIST[ "10.110.7.244" ]	= "denth7xr007";
-		IPBLACKLIST[ "10.110.11.251" ]	= "denth7xr007";
-		IPBLACKLIST[ "10.119.146.19" ]	= "denth7xr007";
-		IPBLACKLIST[ "10.110.9.245" ]	= "denth7xr011";
-		IPBLACKLIST[ "10.110.13.251" ]	= "denth7xr011";
-		IPBLACKLIST[ "10.119.163.15" ]	= "denth7xr011";
-		IPBLACKLIST[ "10.193.22.9" ]	= "ship01";
-		IPBLACKLIST[ "10.193.22.10" ]	= "ship01";
-		IPBLACKLIST[ "10.193.22.11" ]	= "ship01";
-		IPBLACKLIST[ "10.198.0.100" ]	= "wasm01";
-		IPBLACKLIST[ "10.193.17.13" ]	= "XyMon / BigBrother / Hobbit";
-		IPBLACKLIST[ "10.198.0.245" ]	= "faip01 / debianmirror";
+#		IPBLACKLIST[ "10.110.7.244" ]	= "denth7xr007";
+#		IPBLACKLIST[ "10.110.11.251" ]	= "denth7xr007";
+#		IPBLACKLIST[ "10.119.146.19" ]	= "denth7xr007";
+#		IPBLACKLIST[ "10.110.9.245" ]	= "denth7xr011";
+#		IPBLACKLIST[ "10.110.13.251" ]	= "denth7xr011";
+#		IPBLACKLIST[ "10.119.163.15" ]	= "denth7xr011";
+#		IPBLACKLIST[ "10.193.22.9" ]	= "ship01";
+#		IPBLACKLIST[ "10.193.22.10" ]	= "ship01";
+#		IPBLACKLIST[ "10.193.22.11" ]	= "ship01";
+#		IPBLACKLIST[ "10.198.0.100" ]	= "wasm01";
+#		IPBLACKLIST[ "10.193.17.13" ]	= "XyMon / BigBrother / Hobbit";
+#		IPBLACKLIST[ "10.198.0.245" ]	= "faip01 / debianmirror";
 #		IPBLACKLIST[ "" ]	= "";
 	    }
 
@@ -151,27 +153,29 @@ BEGIN{
 			delete PORTBLACKLIST[i];
 		    }
 	    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-		    split( "", PORTBLACKLIST );
+		split( "", PORTBLACKLIST );
 	    } else {
-		PORTBLACKLIST[ "25"	] = "smtp";
-		PORTBLACKLIST[ "53"	] = "dns";
-		PORTBLACKLIST[ "111"	] = "portmap / NFS";
-		PORTBLACKLIST[ "123"	] = "ntp";
-		PORTBLACKLIST[ "161"	] = "snmp";
-		PORTBLACKLIST[ "199"	] = "smux / SNMP Unix Multiplexer";
-		PORTBLACKLIST[ "1500"	] = "dsmc / TSM Backup";
-		PORTBLACKLIST[ "1501"	] = "dsmc / TSM Backup";
-		PORTBLACKLIST[ "1556"	] = "pbx_exchange / Veritas NetBackup";
-		PORTBLACKLIST[ "1557"	] = "pbx_exchange / Veritas NetBackup";
-		PORTBLACKLIST[ "1581"	] = "TSM Webclient";
-		PORTBLACKLIST[ "1984"	] = "bb / XyMon = BigBrother = Hobbit";
-		PORTBLACKLIST[ "2049"	] = "nfs";
-		PORTBLACKLIST[ "3181"	] = "Patrol";
-		PORTBLACKLIST[ "10050"	] = "zabbix_agentd";
-		PORTBLACKLIST[ "13722"	] = "bpjava-msvc / Veritas NetBackup";
-		PORTBLACKLIST[ "13724"	] = "vnetd / Veritas NetBackup";
-		PORTBLACKLIST[ "13782"	] = "bpcd / Veritas NetBackup";
-		PORTBLACKLIST[ "13783"	] = "vopied / Veritas NetBackup";
+		split( "", PORTBLACKLIST );
+
+#		PORTBLACKLIST[ "25"	] = "smtp";
+#		PORTBLACKLIST[ "53"	] = "dns";
+#		PORTBLACKLIST[ "111"	] = "portmap / NFS";
+#		PORTBLACKLIST[ "123"	] = "ntp";
+#		PORTBLACKLIST[ "161"	] = "snmp";
+#		PORTBLACKLIST[ "199"	] = "smux / SNMP Unix Multiplexer";
+#		PORTBLACKLIST[ "1500"	] = "dsmc / TSM Backup";
+#		PORTBLACKLIST[ "1501"	] = "dsmc / TSM Backup";
+#		PORTBLACKLIST[ "1556"	] = "pbx_exchange / Veritas NetBackup";
+#		PORTBLACKLIST[ "1557"	] = "pbx_exchange / Veritas NetBackup";
+#		PORTBLACKLIST[ "1581"	] = "TSM Webclient";
+#		PORTBLACKLIST[ "1984"	] = "bb / XyMon = BigBrother = Hobbit";
+#		PORTBLACKLIST[ "2049"	] = "nfs";
+#		PORTBLACKLIST[ "3181"	] = "Patrol";
+#		PORTBLACKLIST[ "10050"	] = "zabbix_agentd";
+#		PORTBLACKLIST[ "13722"	] = "bpjava-msvc / Veritas NetBackup";
+#		PORTBLACKLIST[ "13724"	] = "vnetd / Veritas NetBackup";
+#		PORTBLACKLIST[ "13782"	] = "bpcd / Veritas NetBackup";
+#		PORTBLACKLIST[ "13783"	] = "vopied / Veritas NetBackup";
 #		PORTBLACKLIST[ "" ] = "";
 	    }
 
@@ -203,12 +207,12 @@ BEGIN{
 	    }
 
 	#
-	if ( IPwhitelist != "" ) {
+	if ( localIPlist != "" ) {
 		# only specific local IPs are to be analyzed
-		if ( IPwhitelist ~ SUBSEP )
-			split( IPwhitelist, IPWHITELIST, SUBSEP );
+		if ( localIPlist ~ SUBSEP )
+			split( localIPlist, IPWHITELIST, SUBSEP );
 		    else
-			split( IPwhitelist, IPWHITELIST );
+			split( localIPlist, IPWHITELIST );
 		# transponate values to indices for easier searching
 		for ( i in IPWHITELIST ) {
 			delete IPBLACKLIST[ IPWHITELIST[i] ];
@@ -235,7 +239,7 @@ BEGIN{
 					print "Command to figure out IPs: " Path2IP > LOGFILE;
 				    }
 			    } else {
-				print "ERROR: Neither ip nor ifconfig found!\n   Please provide relevant IP-adresses with parameter '-v IPwhitelist=[...]'\n" > LOGFILE;
+				print "ERROR: Neither ip nor ifconfig found!\n   Please provide relevant IP-addresses with parameter '-v localIPlist=[...]'\n" > LOGFILE;
 				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) { 
 				    } else
 					exit ERROR = 1;
@@ -265,7 +269,7 @@ BEGIN{
 					print "Command to figure out IPs: " Path2IP > LOGFILE;
 				    }
 			    } else {
-				print "ERROR: ifconfig not found!\n   Please provide relevant IP-adresses with parameter '-v IPwhitelist=[...]'\n" > LOGFILE;
+				print "ERROR: ifconfig not found!\n   Please provide relevant IP-addresses with parameter '-v localIPlist=[...]'\n" > LOGFILE;
 				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) { 
 				    } else
 					exit ERROR = 1;
@@ -294,7 +298,7 @@ BEGIN{
 					print "Command to figure out IPs: " Path2IP;
 				    }
 			    } else {
-				print "ERROR: netstat not found!\n   Please provide relevant IP-adresses with parameter '-v IPwhitelist=[...]'\n" > LOGFILE;
+				print "ERROR: netstat not found!\n   Please provide relevant IP-addresses with parameter '-v localIPlist=[...]'\n" > LOGFILE;
 				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 				    } else
 					exit ERROR = 1;
@@ -375,7 +379,7 @@ BEGIN{
 			close( CMD );
 
 		    } else if ( OS == "SunOS" ) {
-			CMD = "netstat -f inet -f inet6 -P tcp -an 2>/dev/null | awk '{ print $NF,$1;}'"
+			CMD = "netstat -f inet -P tcp -an 2>/dev/null | awk '{ print $NF,$1;}'; netstat -f inet6 -P tcp -an 2>/dev/null | awk '{ print $NF,$1;}'"
 			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 				print "Command to figure out services: " CMD > LOGFILE;
 			    }
@@ -388,7 +392,7 @@ BEGIN{
 				    }
 			close( CMD );
 
-			CMD = "netstat -f inet -f inet6 -P udp -an 2>/dev/null | awk '{ print $NF,$1;}'"
+			CMD = "netstat -f inet -P udp -an 2>/dev/null | awk '{ print $NF,$1;}'; netstat -f inet6 -P udp -an 2>/dev/null | awk '{ print $NF,$1;}'"
 			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 				print "Command to figure out services: " CMD > LOGFILE;
 			    }
@@ -550,7 +554,7 @@ BEGIN{
 	split( "", CONNTRACK );
 
 
-	if ( OS == "SunOS" && LINE[ 1 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[:.][0-9]+/ && LINE[ 2 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[:.][0-9]+/ && tolower( LINE[ 7 ] ) ~ /^established$/ ) {
+	if ( OS == "SunOS" && LINE[ 1 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[:.][0-9]+/ && LINE[ 2 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[:.][0-9]+/ && LINE[ 3 ] ~ /[0-9]+/ && LINE[ 4 ] ~ /[0-9]+/ && LINE[ 5 ] ~ /[0-9]+/ && LINE[ 6 ] ~ /[0-9]+/ ) {
 		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 			++WARNINGS[ "Apparently output from netstat on Solaris v10." ];
 		    }
@@ -777,15 +781,15 @@ BEGIN{
 		CONNINDEX = CONNTRACK[ OUTPUTFORMAT[ 1 ] ];
 		for ( i=2; OUTPUTFORMAT[ i+1 ] != ""; i++ )
 			CONNINDEX = CONNINDEX SUBSEP CONNTRACK[ OUTPUTFORMAT[i] ];
-		if ( CONNTRACK[ "persistence" ] < 60 || (! ( CONNINDEX in CONNECTIONS )) )
-			++CONNECTIONS[ CONNINDEX ];
+#		if ( CONNTRACK[ "persistence" ] < 60 || (! ( CONNINDEX in CONNECTIONS )) )
+		++CONNECTIONS[ CONNINDEX ];
 
 	    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 		CONNINDEX = CONNTRACK[ OUTPUTFORMAT[ 1 ] ];
 		for ( i=2; OUTPUTFORMAT[ i+1 ] != ""; i++ )
 			CONNINDEX = CONNINDEX SUBSEP CONNTRACK[ OUTPUTFORMAT[i] ];
-		if ( CONNTRACK[ "persistence" ] < 60 || (! ( CONNINDEX in CONNECTIONS )) )
-			++CONNECTIONS[ CONNINDEX ];
+#		if ( CONNTRACK[ "persistence" ] < 60 || (! ( CONNINDEX in CONNECTIONS )) )
+		++CONNECTIONS[ CONNINDEX ];
 		next;
 	    } else
 
@@ -803,13 +807,13 @@ END{
 
 	printf( "#%s\n", INDEX ) > STATEFILE;
 	for ( i in CONNECTIONS )
-		printf( "%s,%s\n", i, CONNECTIONS[i] ) > STATEFILE; 
+		printf( "%s,%s\n", i, ( CONNECTIONS[i] > SAVEDCONNECTIONS[i] ? CONNECTIONS[i] : SAVEDCONNECTIONS[i] ) ) > STATEFILE; 
 	close( STATEFILE );
 
 	if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 		printf( "#%s\n", INDEX ) > LOGFILE;
 		for ( i in CONNECTIONS )
-			printf( "%s,%s\n", i, CONNECTIONS[i] ) > LOGFILE;
+			printf( "%s,%d,%d\n", i, CONNECTIONS[i], SAVEDCONNECTIONS[i] ) > LOGFILE;
 		close( LOGFILE );
 	    }
 	if ( NOWARNINGS != "" && NOWARNINGS != "0" && NOWARNINGS != 0 ) {
