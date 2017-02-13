@@ -24,19 +24,28 @@
 #	netstat -an -f inet | awk -f ETLconntrack.awk
 # 
 # 
-# accepted parameters:
+# parameters considered to be used frequently
 # -v STATEFILE=$PATH/$FILE.csv 
+# 
+# 
+# additionally accepted parameters:
 # -v OutputFormat="service,direction,localIP,remoteIP,counter"
-# -v localIPlist="10.119.146.19 10.110.7.244"
 # -v IPblacklist="127.0.0.1 192.168.49.1"
 # -v PORTblacklist="22 111 2048 2049"
-# -v HOSTNAME="myname"	# NOT to be used beyond special circumstances!
-# -v LOGFILE=$PATH/$FILE.log
 # -v NOWARNINGS=1
-# *_conntrack-file	# if another file beyond /proc/net/nf_conntrack or /proc/net/ip_conntrack or STDIN for netstat-output is to be read
+# *_conntrack-file	# if some other file is to be read beyond /proc/net/nf_conntrack or /proc/net/ip_conntrack or STDIN for netstat-output
+# 
+# parameters NOT to be used beyond special circumstances like e.g. analyzing data from remote hosts:
+# -v HOSTNAME="othername"
+# -v IPlist="10.119.146.19 10.110.7.244"
+# -v Services="tcp/22 tcp/80"
+# 
+# parameters usable for development and debugging
+# -v DEBUG=1
+# -v LOGFILE=$PATH/$FILE.log
 # 
 # 
-# v2.93 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
+# v2.94 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -184,17 +193,17 @@ BEGIN{
 	    }
 
 	#
-	if ( localIPlist != "" ) {
-		# only specific local IPs are to be analyzed
-		if ( localIPlist ~ SUBSEP )
-			split( localIPlist, IPWHITELIST, SUBSEP );
+	if ( IPlist != "" ) {
+		# IPs to be analyzed are specified on commandline
+		if ( IPlist ~ SUBSEP )
+			split( IPlist, localIPs, SUBSEP );
 		    else
-			split( localIPlist, IPWHITELIST );
+			split( IPlist, localIPs );
 		# transponate values to indices for easier searching
-		for ( i in IPWHITELIST ) {
-			delete IPBLACKLIST[ IPWHITELIST[i] ];
-			IPWHITELIST[ IPWHITELIST[i] ] = i;
-			delete IPWHITELIST[i];
+		for ( i in localIPs ) {
+			delete IPBLACKLIST[ localIPs[i] ];
+			localIPs[ localIPs[i] ] = i;
+			delete localIPs[i];
 		    }
 	    } else {
 		# any local IP is to be analyzed
@@ -216,7 +225,7 @@ BEGIN{
 					print "Command to figure out IPs: " Path2IP > LOGFILE;
 				    }
 			    } else {
-				print "ERROR: Neither ip nor ifconfig found!\n   Please provide relevant IP-addresses with parameter '-v localIPlist=[...]'\n" > LOGFILE;
+				print "ERROR: Neither ip nor ifconfig found!\n   Please provide relevant IP-addresses with parameter '-v IPlist=[...]'\n" > LOGFILE;
 				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) { 
 				    } else
 					exit ERROR = 1;
@@ -225,44 +234,15 @@ BEGIN{
 			close( "find /sbin/ifconfig 2>/dev/null" );
 
 			while ( ( CMD | getline i ) > 0 && Path2IP != "" )
-				++IPWHITELIST[i];
+				++localIPs[i];
 			close( CMD );
 
 			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 				print CMD > LOGFILE;
-				for ( i in IPWHITELIST )
+				for ( i in localIPs )
 					print i > LOGFILE;
 				printf( "\n" ) > LOGFILE;
 			    }
-#		    } else if ( OS == "SunOS" ) {
-#			if (( "find /usr/sbin/ifconfig 2>/dev/null" | getline Path2IP ) > 0) {
-#				#ifconfig -a
-#				#bnx0: flags=9000843<UP,BROADCAST,RUNNING,MULTICAST,IPv4,NOFAILOVER> mtu 1500 index 2
-#				#        inet 10.193.24.8 netmask ffffff80 broadcast 10.193.24.127
-#				#[...]
-#
-#				CMD = "/usr/sbin/ifconfig -a | awk '{ if ( $1 ~ /^inet$/ ) { if ( $2 ~ /:/ ) print substr( $2, index( $2, \":\" ) +1 ); else print $2; }}'"
-#				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-#					print "Command to figure out IPs: " Path2IP > LOGFILE;
-#				    }
-#			    } else {
-#				print "ERROR: ifconfig not found!\n   Please provide relevant IP-addresses with parameter '-v localIPlist=[...]'\n" > LOGFILE;
-#				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) { 
-#				    } else
-#					exit ERROR = 1;
-#			    }
-#			close( "find /usr/sbin/ifconfig 2>/dev/null" );
-#
-#			while ( ( CMD | getline i ) > 0 && Path2IP != "" )
-#				++IPWHITELIST[i];
-#			close( CMD );
-#
-#			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-#				print CMD > LOGFILE;
-#				for ( i in IPWHITELIST )
-#					print i > LOGFILE;
-#				printf( "\n" ) > LOGFILE;
-#			    }
 		    } else if ( OS == "HP-UX" || OS == "AIX" || OS == "SunOS" ) {
 			if (( "find /usr/bin/netstat 2>/dev/null" | getline NETSTAT ) > 0) {
 				#$ netstat -ni
@@ -275,7 +255,7 @@ BEGIN{
 					print "Command to figure out IPs: " NETSTAT;
 				    }
 			    } else {
-				print "ERROR: netstat not found!\n   Please provide relevant IP-addresses with parameter '-v localIPlist=[...]'\n" > LOGFILE;
+				print "ERROR: netstat not found!\n   Please provide relevant IP-addresses with parameter '-v IPlist=[...]'\n" > LOGFILE;
 				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 				    } else
 					exit ERROR = 1;
@@ -283,12 +263,12 @@ BEGIN{
 			close( "find /usr/bin/netstat 2>/dev/null" );
 
 			while ( ( CMD | getline i ) > 0 && NETSTAT != "" )
-				++IPWHITELIST[i];
+				++localIPs[i];
 			close( CMD );
 
 			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 				print CMD > LOGFILE;
-				for ( i in IPWHITELIST )
+				for ( i in localIPs )
 					print i > LOGFILE;
 				printf( "\n" ) > LOGFILE;
 			    }
@@ -563,6 +543,7 @@ BEGIN{
 		sub( /[.:][0-9]+$/, "", CONNTRACK[ "localIP" ] );
 		CONNTRACK[ "src" ] = CONNTRACK[ "localIP" ];
 
+
 	    } else if ( OS == "Linux" && LINE[ 1 ] ~ /^ipv[46]$/ && LINE[ 3 ] in L4PROTOCOLS ) {
 		# normalize Line wether /proc/net/nf_conntrack or /proc/net/ip_conntrack was read
 
@@ -573,13 +554,12 @@ BEGIN{
 		CONNTRACK[ "l4proto" ] = LINE[ 3 ];
 		CONNTRACK[ "persistence" ] = LINE[ 5 ];
 
-		for ( i=6; i<=12; i++ ) {
-#				if ( index( LINE[i], "=" ) > 0 ) {
+		for ( i=6; i<LINEWIDTH; i++ ) {
 			if ( LINE[i] ~ /\=/ ) {
 				split( LINE[i], ENTRY, "=" );
 				if (! ( ENTRY[ 1 ] in CONNTRACK ))
-					CONNTRACK[ ENTRY[ 1 ] ] = ENTRY[ 2 ]
-				if ( ENTRY[ 1 ] == "dport" )
+					CONNTRACK[ ENTRY[ 1 ] ] = ENTRY[ 2 ];
+				    else
 					break;
 			    }
 		    }
@@ -593,18 +573,17 @@ BEGIN{
 		CONNTRACK[ "l4proto" ] = LINE[ 1 ];
 		CONNTRACK[ "persistence" ] = LINE[ 3 ];
 
-		for ( i=4; i<=10; i++ ) {
+		for ( i=4; i<LINEWIDTH; i++ ) {
 			if ( LINE[i] !~ /=/ )
 				continue;
 			    else {
 				split( LINE[i], ENTRY, "=" );
 				if (! ( ENTRY[ 1 ] in CONNTRACK ))
 					CONNTRACK[ ENTRY[ 1 ] ] = ENTRY[ 2 ];
-				if ( ENTRY[ 1 ] == "dport" )
+				else
 					break;
 			    }
 		    }
-
 
 	    } else if (	LINE[ 4 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[:.][0-9]+/ &&	\
 			LINE[ 5 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[:.][0-9]+/ &&	\
@@ -615,12 +594,14 @@ BEGIN{
 		#Active Internet connections (w/o servers)
 		#Proto Recv-Q Send-Q Local Address               Foreign Address             State       User       Inode
 		#tcp        0      0 10.110.7.244:2049           10.110.6.35:606             ESTABLISHED 65534      2915692474
+		# 
 		## HPUX:
 		#$ netstat -an -f inet | grep -v LISTEN | head
 		#Active Internet connections (including servers)
 		#Proto Recv-Q Send-Q  Local Address          Foreign Address        (state)
 		#tcp        0      0  10.91.27.26.63905      10.91.27.26.1521        ESTABLISHED
 		#tcp        0      0  10.91.27.26.59648      10.118.63.82.1521       ESTABLISHED
+		# 
 
 		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 			++WARNINGS[ "Apparently output from netstat on Linux or HP-UX..." ];
@@ -650,20 +631,17 @@ BEGIN{
 		# cleanup ":port$"
 		sub( /[.:][0-9]+$/, "", CONNTRACK[ "localIP" ] );
 		# correct truncation of localIP and remoteIP related to fixed-width of netstat-ouput on old Linux
-		if ( OS == "Linux" && !( CONNTRACK[ "localIP" ] in IPWHITELIST ) && CONNTRACK[ "localIP" ] ~ /:/ ) {
+		if ( OS == "Linux" && !( CONNTRACK[ "localIP" ] in localIPs ) && CONNTRACK[ "localIP" ] ~ /:/ ) {
 
 			# cleanup IPv6-Prefix "^::ffff:"
 			sub( /^[:f]+:/, "", CONNTRACK[ "localIP" ] );
 			sub( /^[:f]+:/, "", CONNTRACK[ "remoteIP" ] );
 			sub( /6$/, "", CONNTRACK[ "l4proto" ] );
 
-			for ( i in IPWHITELIST )
-				if ( CONNTRACK[ "localIP" ] ~ ( "^" IPWHITELIST[ i ] ) ) {
-					TruncatedIP++;
+			for ( i in localIPs )
+				if ( CONNTRACK[ "localIP" ] ~ ( "^" localIPs[ i ] ) ) {
 					sub( /\.[0-9]*$/, ".", CONNTRACK[ "remoteIP" ] );
 					CONNTRACK[ "dst" ] = CONNTRACK[ "remoteIP" ];
-					TruncatedIPremote = CONNTRACK[ "remoteIP" ];
-					TruncatedIPlocal = CONNTRACK[ "localIP" ];
 					# trying to repair at least localIP
 					CONNTRACK[ "localIP" ] = i;
 					break;
@@ -684,14 +662,14 @@ BEGIN{
 		next;
 
 	# map localIP and remoteIP site
-	if ( ( CONNTRACK[ "src" ] in IPWHITELIST && CONNTRACK[ "dst" ] in IPWHITELIST ) ) {
+	if ( ( CONNTRACK[ "src" ] in localIPs && CONNTRACK[ "dst" ] in localIPs ) ) {
 		CONNTRACK[ "direction" ] = "local";
-	    } else if ( CONNTRACK[ "src" ] in IPWHITELIST ) {
+	    } else if ( CONNTRACK[ "src" ] in localIPs ) {
 		CONNTRACK[ "localIP" ] = CONNTRACK[ "src" ];
 		CONNTRACK[ "localPort" ] = CONNTRACK[ "sport" ];
 		CONNTRACK[ "remoteIP" ] = CONNTRACK[ "dst" ];
 		CONNTRACK[ "remotePort" ] = CONNTRACK[ "dport" ];
-	    } else if ( CONNTRACK[ "dst" ] in IPWHITELIST ) {
+	    } else if ( CONNTRACK[ "dst" ] in localIPs ) {
 		CONNTRACK[ "localIP" ] = CONNTRACK[ "dst" ];
 		CONNTRACK[ "localPort" ] = CONNTRACK[ "dport" ];
 		CONNTRACK[ "remoteIP" ] = CONNTRACK[ "src" ];
@@ -751,21 +729,19 @@ BEGIN{
 	    else
 		CONNTRACK[ "daemon" ] = "?";
 
-	if (! ( CONNTRACK[ "direction" ] == "local"	|| CONNTRACK[ "direction" ] == "foreign"		|| \
+	if (! ( CONNTRACK[ "direction" ] == "local"	|| CONNTRACK[ "direction"  ] == "foreign"		|| \
 	    CONNTRACK[ "localPort" ] in PORTBLACKLIST	|| CONNTRACK[ "remotePort" ] in PORTBLACKLIST	|| \
-	    CONNTRACK[ "localIP" ] in IPBLACKLIST		|| CONNTRACK[ "remoteIP" ] in IPBLACKLIST ) ) {
+	    CONNTRACK[ "localIP"   ] in IPBLACKLIST	|| CONNTRACK[ "remoteIP"   ] in IPBLACKLIST ) ) {
 
 		CONNINDEX = CONNTRACK[ OUTPUTFORMAT[ 1 ] ];
 		for ( i=2; OUTPUTFORMAT[ i+1 ] != ""; i++ )
 			CONNINDEX = CONNINDEX SUBSEP CONNTRACK[ OUTPUTFORMAT[i] ];
-#		if ( CONNTRACK[ "persistence" ] < 60 || (! ( CONNINDEX in CONNECTIONS )) )
 		++CONNECTIONS[ CONNINDEX ];
 
 	    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 		CONNINDEX = CONNTRACK[ OUTPUTFORMAT[ 1 ] ];
 		for ( i=2; OUTPUTFORMAT[ i+1 ] != ""; i++ )
 			CONNINDEX = CONNINDEX SUBSEP CONNTRACK[ OUTPUTFORMAT[i] ];
-#		if ( CONNTRACK[ "persistence" ] < 60 || (! ( CONNINDEX in CONNECTIONS )) )
 		++CONNECTIONS[ CONNINDEX ];
 		next;
 	    } else
@@ -783,6 +759,10 @@ END{
 		INDEX = INDEX SUBSEP OUTPUTFORMAT[i];
 
 	printf( "#%s\n", INDEX ) > STATEFILE;
+	for ( i in SAVEDCONNECTIONS )
+		if ( !( i in CONNECTIONS ) )
+			printf( "%s,%s\n", i, SAVEDCONNECTIONS[i] ) > STATEFILE; 
+		
 	for ( i in CONNECTIONS )
 		printf( "%s,%s\n", i, ( CONNECTIONS[i] > SAVEDCONNECTIONS[i] ? CONNECTIONS[i] : SAVEDCONNECTIONS[i] ) ) > STATEFILE; 
 	close( STATEFILE );
