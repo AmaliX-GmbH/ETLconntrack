@@ -33,7 +33,7 @@
 # *_conntrack-file	# if another file beyond /proc/net/nf_conntrack or /proc/net/ip_conntrack or STDIN for netstat-output is to be read
 # 
 # 
-# v2.91 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
+# v2.92 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -68,8 +68,8 @@ BEGIN{
 	close( "find /dev/stderr" );
 
 	# sleep for up to four seconds to distribute load on virtual systems
-#	srand();
-#	system( "sleep " int( 1 + rand() * 4 ) );
+	srand();
+	system( "sleep " systime() % 4 + int( 1 + rand() * 4 ) );
 
 	# Define fields in Output and StateFile
 	if ( OutputFormat != "" ) {
@@ -163,7 +163,7 @@ BEGIN{
 	    }
 
 	#
-	if (( OS == "" ) && ( "uname -s" | getline OS ) > 0 && ( OS != "Linux" && OS != "SunOS" && OS != "HP-UX" )) {
+	if (( OS == "" ) && ( "uname -s" | getline OS ) > 0 && ( OS != "Linux" && OS != "SunOS" && OS != "HP-UX" && OS != "AIX" )) {
 		print "ERROR: Unknown OS \"" OS "\"!\n   Please gather netstat-data manually and run skript on supported awk-version.\n" > LOGFILE;
 		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) { 
 		    } else
@@ -225,45 +225,45 @@ BEGIN{
 					print i > LOGFILE;
 				printf( "\n" ) > LOGFILE;
 			    }
-		    } else if ( OS == "SunOS" ) {
-			if (( "find /usr/sbin/ifconfig 2>/dev/null" | getline Path2IP ) > 0) {
-				#ifconfig -a
-				#bnx0: flags=9000843<UP,BROADCAST,RUNNING,MULTICAST,IPv4,NOFAILOVER> mtu 1500 index 2
-				#        inet 10.193.24.8 netmask ffffff80 broadcast 10.193.24.127
-				#[...]
-
-				CMD = "/usr/sbin/ifconfig -a | awk '{ if ( $1 ~ /^inet$/ ) { if ( $2 ~ /:/ ) print substr( $2, index( $2, \":\" ) +1 ); else print $2; }}'"
-				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-					print "Command to figure out IPs: " Path2IP > LOGFILE;
-				    }
-			    } else {
-				print "ERROR: ifconfig not found!\n   Please provide relevant IP-addresses with parameter '-v localIPlist=[...]'\n" > LOGFILE;
-				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) { 
-				    } else
-					exit ERROR = 1;
-			    }
-			close( "find /usr/sbin/ifconfig 2>/dev/null" );
-
-			while ( ( CMD | getline i ) > 0 && Path2IP != "" )
-				++IPWHITELIST[i];
-			close( CMD );
-
-			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-				print CMD > LOGFILE;
-				for ( i in IPWHITELIST )
-					print i > LOGFILE;
-				printf( "\n" ) > LOGFILE;
-			    }
-		    } else if ( OS == "HP-UX" ) {
-			if (( "find /usr/bin/netstat 2>/dev/null" | getline Path2IP ) > 0) {
+#		    } else if ( OS == "SunOS" ) {
+#			if (( "find /usr/sbin/ifconfig 2>/dev/null" | getline Path2IP ) > 0) {
+#				#ifconfig -a
+#				#bnx0: flags=9000843<UP,BROADCAST,RUNNING,MULTICAST,IPv4,NOFAILOVER> mtu 1500 index 2
+#				#        inet 10.193.24.8 netmask ffffff80 broadcast 10.193.24.127
+#				#[...]
+#
+#				CMD = "/usr/sbin/ifconfig -a | awk '{ if ( $1 ~ /^inet$/ ) { if ( $2 ~ /:/ ) print substr( $2, index( $2, \":\" ) +1 ); else print $2; }}'"
+#				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+#					print "Command to figure out IPs: " Path2IP > LOGFILE;
+#				    }
+#			    } else {
+#				print "ERROR: ifconfig not found!\n   Please provide relevant IP-addresses with parameter '-v localIPlist=[...]'\n" > LOGFILE;
+#				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) { 
+#				    } else
+#					exit ERROR = 1;
+#			    }
+#			close( "find /usr/sbin/ifconfig 2>/dev/null" );
+#
+#			while ( ( CMD | getline i ) > 0 && Path2IP != "" )
+#				++IPWHITELIST[i];
+#			close( CMD );
+#
+#			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+#				print CMD > LOGFILE;
+#				for ( i in IPWHITELIST )
+#					print i > LOGFILE;
+#				printf( "\n" ) > LOGFILE;
+#			    }
+		    } else if ( OS == "HP-UX" || OS == "AIX" || OS == "SunOS" ) {
+			if (( "find /usr/bin/netstat 2>/dev/null" | getline NETSTAT ) > 0) {
 				#$ netstat -ni
 				#Name      Mtu  Network	 Address	 Ipkts	      Ierrs Opkts	      Oerrs Coll
 				#lan1:1    1500 10.91.176.0     10.91.176.156   1366	       0     0		  0     0
 				#lan1      1500 10.91.176.0     10.91.176.153   3487569	    0     3693219	    0     0
 
-				CMD = Path2IP " -ni | awk '{ if ( $1 ~ /[0-9]$/ ) print $4;}'"
+				CMD = NETSTAT " -ni | awk '{ if ( $1 ~ /[0-9]$/ ) print $4;}'"
 				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-					print "Command to figure out IPs: " Path2IP;
+					print "Command to figure out IPs: " NETSTAT;
 				    }
 			    } else {
 				print "ERROR: netstat not found!\n   Please provide relevant IP-addresses with parameter '-v localIPlist=[...]'\n" > LOGFILE;
@@ -273,7 +273,7 @@ BEGIN{
 			    }
 			close( "find /usr/bin/netstat 2>/dev/null" );
 
-			while ( ( CMD | getline i ) > 0 && Path2IP != "" )
+			while ( ( CMD | getline i ) > 0 && NETSTAT != "" )
 				++IPWHITELIST[i];
 			close( CMD );
 
