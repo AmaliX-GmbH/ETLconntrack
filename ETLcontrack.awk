@@ -1,38 +1,59 @@
 #!/usr/bin/awk -f
-#
-# see http://www.iptables.info/en/connection-state.html
 # 
-# HowTi Use:
-# on Linux:
+# ETLconntrack.awk: log data of current connections for defining communication-matrices
+# 
+# HowTo Use:
+# on Linux:	# see http://www.iptables.info/en/connection-state.html
+#	modprobe nf_conntrack || modprobe ip_conntrack
 #	./bin/ETLcontrack.awk 
-# or
-#	netstat -tune --notrim | awk -f bin/ETLconntrack.awk
+#   or
+#	netstat -tune [--notrim|--wide] | awk -f ETLconntrack.awk
+# 
 # on SunOS:
-#	netstat -n -f inet -f inet6 | /usr/xpg4/bin/awk -f bin/ETLconntrack.awk
+#	netstat -n -f inet -f inet6 | /usr/local/bin/gawk -f ETLconntrack.awk
+#   or
+#	netstat -n -f inet -f inet6 | /usr/xpg4/bin/awk -f ETLconntrack.awk
+# 
 # on HP-UX:
-#	netstat -an -f inet | awk -f bin/ETLconntrack.awk
+#	netstat -an -f inet | awk -f ETLconntrack.awk
 # 
 # accepted parameters:
-# -v OutputFormat="service,direction,localIP,remoteIP,counter"
 # -v STATEFILE=$PATH/$FILE.csv 
-# -v LOGFILE=$PATH/$FILE.log
+# -v OutputFormat="service,direction,localIP,remoteIP,counter"
 # -v IPblacklist="127.0.0.1 192.168.49.1"
 # -v IPwhitelist="10.119.146.19 10.110.7.244"
 # -v PORTblacklist="22 111 2048 2049"
-# -v Services="udp/123"	NOT to be used beyond special circumstances!
-# -v HOSTNAME="myname"	NOT to be used beyond special circumstances!
-# -v DEBUG=1
+# -v Services="udp/123"	# NOT to be used beyond special circumstances!
+# -v HOSTNAME="myname"	# NOT to be used beyond special circumstances!
+# -v LOGFILE=$PATH/$FILE.log
 # -v NOWARNINGS=1
-# *_conntrack-file	if another file beyond /proc/net/ip_conntrack or /proc/net/nf_conntrack is to be read
+# *_conntrack-file	# if another file beyond /proc/net/nf_conntrack or /proc/net/ip_conntrack or STDIN for netstat-output is to be read
 # 
-# (C) 2016 by Henning Rohde, hero@amalix.de
-# feel free to ask for further customization
+# 
+# v2.3 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+#  
 # 
 # FixMe: No IPv6 yet
 # FixMe: netstat never shows any UDP-communication
 # FixMe: only accurate regarding UDP on modern Linux >v2.4 by using kernel-module for connection-tracking
-# FixMe: netstat on SunOS shows only established TCP-connections || maybe "lsof -lnPi"
-# FixMe: netstat shows listening daemon only on Linux, and only if running with root-privileges || maybe daemon = "lsof -lnPi :$PORT"
+# FixMe: netstat on SunOS shows only established TCP-connections || maybe "lsof -nPi"
+# FixMe: netstat shows listening daemon only on Linux, and only if running with root-privileges || maybe daemon = "lsof -nPi :$PORT"
+# 
+# feel free to ask for further customization
 # 
 
 BEGIN{
@@ -46,20 +67,15 @@ BEGIN{
 	# Define fields in Output and StateFile
 	if ( OutputFormat != "" ) {
 		if ( OutputFormat ~ SUBSEP )
-			FORMATWIDTH = split( OutputFormat, OUTPUTFORMAT, SUBSEP );
+			split( OutputFormat, OUTPUTFORMAT, SUBSEP );
 		    else
-			FORMATWIDTH = split( OutputFormat, OUTPUTFORMAT );
+			split( OutputFormat, OUTPUTFORMAT );
 	    } else {
-		FORMATWIDTH = split( "hostname,service,direction,localIP,localPort,remoteIP,remotePort,daemon,counter", OUTPUTFORMAT, "," );
-#		FORMATWIDTH = split( "l4proto,localIP,localPort,remoteIP,remotePort,counter", OUTPUTFORMAT, "," );
-#		FORMATWIDTH = split( "service,direction,localIP,remoteIP,counter", OUTPUTFORMAT, "," );
-#		FORMATWIDTH = split( "service,client,server,counter", OUTPUTFORMAT, "," );
+		split( "hostname,service,direction,localIP,localPort,remoteIP,remotePort,daemon,counter", OUTPUTFORMAT, SUBSEP );
+#		split( "l4proto,localIP,localPort,remoteIP,remotePort,counter", OUTPUTFORMAT, SUBSEP );
+#		split( "service,direction,localIP,remoteIP,counter", OUTPUTFORMAT, SUBSEP );
+#		split( "service,client,server,counter", OUTPUTFORMAT, SUBSEP );
 	    }
-
-	# predefine Index as Headline
-	INDEX = OUTPUTFORMAT[ 1 ];
-	for ( i=2; OUTPUTFORMAT[i] != ""; i++ )
-		INDEX = INDEX SUBSEP OUTPUTFORMAT[i];
 
 	# read StateFile
 	if ( STATEFILE != "" ) {
@@ -96,7 +112,7 @@ BEGIN{
 	    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 		split( "", IPBLACKLIST );
 	    } else {
-		++IPBLACKLIST[ "127.0.0.1" ];
+		IPBLACKLIST[ "127.0.0.1"   ]	= "localhost";
 		IPBLACKLIST[ "10.110.7.244" ]	= "denth7xr007";
 		IPBLACKLIST[ "10.110.11.251" ]	= "denth7xr007";
 		IPBLACKLIST[ "10.119.146.19" ]	= "denth7xr007";
@@ -107,7 +123,9 @@ BEGIN{
 		IPBLACKLIST[ "10.193.22.10" ]	= "ship01";
 		IPBLACKLIST[ "10.193.22.11" ]	= "ship01";
 		IPBLACKLIST[ "10.198.0.100" ]	= "wasm01";
-#		ipBLACKLIST[ "" ]	= "";
+		IPBLACKLIST[ "10.193.17.13" ]	= "XyMon / BigBrother / Hobbit";
+		IPBLACKLIST[ "10.198.0.245" ]	= "faip01 / debianmirror";
+#		IPBLACKLIST[ "" ]	= "";
 	    }
 
 	# blacklist local or remote Ports
@@ -128,6 +146,7 @@ BEGIN{
 		PORTBLACKLIST[ "123" ] = "NTP";
 		PORTBLACKLIST[ "1984" ] = "XyMon / BigBrother / Hobbit";
 		PORTBLACKLIST[ "3181" ] = "Patrol";
+#		PORTBLACKLIST[ "" ] = "";
 	    }
 
 	# 
@@ -142,7 +161,7 @@ BEGIN{
 	    }
 	sub( /[^A-Za-z0-9-].*$/, "", HOSTNAME );
 	if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-		print "Hostname: " HOSTNAME;
+		print "Hostname: " HOSTNAME > LOGFILE;
 	    }
 
 	#
@@ -154,7 +173,7 @@ BEGIN{
 	    }
 	close( "uname -s" );
 	if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-		print "Operating System: " OS;
+		print "Operating System: " OS > LOGFILE;
 	    }
 
 	#
@@ -324,76 +343,37 @@ BEGIN{
 					SERVICES[ substr( Service[ 1 ], 1, 3 ) "/" port ] = ( daemon != "" ? daemon : "-" );
 
 				    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-#					print i > LOGFILE;
+					print i > LOGFILE;
 				    }
 			    }
 			close( CMD );
 
 		    } else if ( OS == "SunOS" ) {
-#			disabling lsof to gather running services because lsof is not able to display detailed data
-#	COMMAND     PID     USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
-#	inetd       429        0   22u  IPv4                              TCP no TCP/UDP/IP information available
-#	inetd       429        0   25u  IPv4                              TCP no TCP/UDP/IP information available
-#	inetd       429        0   26u  IPv4                              TCP no TCP/UDP/IP information available
-#	[...]
-#
-#			# check priviledge because lsof needs root-privileges
-#			if (( "/usr/xpg4/bin/id -u 2>/dev/null" | getline UID ) > 0 && UID == 0 && ( "type lsof 2>/dev/null" | getline LSOF ) > 0 ) {
-#				close ( "/usr/xpg4/bin/id -u 2>/dev/null" );
-#				close ( "type lsof 2>/dev/null" );
-#
-#				CMD = "lsof -lnPi 2>/dev/null | grep -v '[-][>]'"
-#				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-#					print "Command to figure out services: " CMD > LOGFILE;
-#				    }
-#				while (( CMD | getline i ) > 0) {
-#
-#					gsub( /[ ]+/, SUBSEP, i );
-#					lastColumn = split( i, Service, SUBSEP );
-#
-#					if ( tolower( Service[ 7 ] ) in L4PROTOCOLS && $8 ~ /[.:][0-9]+$/ ) {
-#						port = Service[ 9 ];
-#						sub( /^.*[.:]/, "", port );
-#						daemon = Service[ 1 ];
-#						SERVICES[ tolower( Service[ 7 ] ) "/" port ] = ( daemon != "" ? daemon : "-" );
-#
-#					    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-##						print i > LOGFILE;
-#					    }
-#				    }
-#				close( CMD );
-#
-#			    } else {
-				close ( "id -u 2>/dev/null" );
-				close ( "type lsof 2>/dev/null" );
-
-				CMD = "netstat -f inet -f inet6 -P tcp -an 2>/dev/null | awk '{ print $NF,$1;}'"
-				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-					print "Command to figure out services: " CMD > LOGFILE;
+			CMD = "netstat -f inet -f inet6 -P tcp -an 2>/dev/null | awk '{ print $NF,$1;}'"
+			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+				print "Command to figure out services: " CMD > LOGFILE;
+			    }
+			while (( CMD | getline i ) > 0)
+				if ( tolower( i ) ~ /^listen/ && tolower( i ) !~ /^listen 127.0.0.1/ ) {
+					sub( /^.*\./, "", i );
+					SERVICES[ "tcp/" i ] = ( daemon != "" ? daemon : "-" );
+				    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+#					print i > LOGFILE;
 				    }
-				while (( CMD | getline i ) > 0)
-					if ( tolower( i ) ~ /^listen/ && tolower( i ) !~ /^listen 127.0.0.1/ ) {
-						sub( /^.*\./, "", i );
-						SERVICES[ "tcp/" i ] = ( daemon != "" ? daemon : "-" );
-					    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-#						print i > LOGFILE;
-					    }
-				close( CMD );
+			close( CMD );
 
-				# FixMe: UDP - netstat -p udp has no output
-				CMD = "netstat -f inet -f inet6 -P udp -an 2>/dev/null | awk '{ print $NF,$1;}'"
-				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-					print "Command to figure out services: " CMD > LOGFILE;
+			CMD = "netstat -f inet -f inet6 -P udp -an 2>/dev/null | awk '{ print $NF,$1;}'"
+			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+				print "Command to figure out services: " CMD > LOGFILE;
+			    }
+			while (( CMD | getline i ) > 0)
+				if ( tolower( i ) ~ /^idle/ && tolower( i ) !~ /^idle 127.0.0.1/ ) {
+					sub( /^.*\./, "", i );
+					SERVICES[ "udp/" substr( i, index( i, "." ) +1 ) ] = ( daemon != "" ? daemon : "-" );
+				    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+#					print i > LOGFILE;
 				    }
-				while (( CMD | getline i ) > 0)
-					if ( tolower( i ) ~ /^idle/ && tolower( i ) !~ /^idle 127.0.0.1/ ) {
-						sub( /^.*\./, "", i );
-						SERVICES[ "udp/" substr( i, index( i, "." ) +1 ) ] = ( daemon != "" ? daemon : "-" );
-					    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-#						print i > LOGFILE;
-					    }
-				close( CMD );
-#			    }
+			close( CMD );
 
 		    } else if ( OS == "HP-UX" ) {
 			CMD = "netstat -an -f inet 2>/dev/null | grep -v 'ESTABLISHED'";
@@ -446,30 +426,30 @@ BEGIN{
 			    }
 
 			if ( OS == "Linux" ) {
-				# autodetect wether /proc/net/ip_conntrack or /proc/net/nf_conntrack can be read
-				if (( getline i < "/proc/net/ip_conntrack" ) > 0 ) {
-					ARGV[ ARGC++ ] = "/proc/net/ip_conntrack";
-					if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-						print "ip_conntrack looks readable." > LOGFILE;
-					    }
-					close ( "/proc/net/ip_conntrack" );
-
-				    } else if (( getline i < "/proc/net/nf_conntrack" ) > 0 ) {
+				# autodetect wether /proc/net/nf_conntrack or "old" /proc/net/ip_conntrack can be read
+				if (( getline i < "/proc/net/nf_conntrack" ) > 0 ) {
 					ARGV[ ARGC++ ] = "/proc/net/nf_conntrack";
 					if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-						print "nf_conntrack looks readable." > LOGFILE;
+						print "Autodetect input-file: /proc/net/nf_conntrack exists and is readable." > LOGFILE;
 					    }
 					close ( "/proc/net/nf_conntrack" );
 
+				    } else if (( getline i < "/proc/net/ip_conntrack" ) > 0 ) {
+					ARGV[ ARGC++ ] = "/proc/net/ip_conntrack";
+					if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+						print "Autodetect input-file: /proc/net/ip_conntrack exists and is readable." > LOGFILE;
+					    }
+					close ( "/proc/net/ip_conntrack" );
+
 				    } else {
-					# check priviledge because /proc/net/ip_conntrack and /proc/net/nf_conntrack are only readable to root
+					# check priviledge because /proc/net/nf_conntrack and /proc/net/ip_conntrack are only readable to root
 					if (( "id -u 2>/dev/null" | getline UID ) > 0 && UID > 0 ) {
 						print "ERROR: Skript must be run as root for reading /proc/net/*_conntrack!\n" > LOGFILE;
 						if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 						    } else
 							exit ERROR = 1;
 					    } else {
-						print "ERROR: Cannot read any conntrack-files!\n   Please modprobe depending on kernel-version either ip_conntrack or nf_conntrack!\n" > LOGFILE;
+						print "ERROR: Cannot read any conntrack-files!\n   Please modprobe depending on kernel-version either nf_conntrack or ip_conntrack!\n" > LOGFILE;
 						if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 						    } else
 							exit ERROR = 1;
@@ -506,7 +486,7 @@ BEGIN{
 		# check input-files for readability
 		if ( ARGV[i] ~ /^[a-zA-Z_][a-zA-Z0-9_]*=.*/ || ARGV[i] ~ /^-/ || ARGV[i] == "/dev/stdin") {
 			NoFileArgs++;
-			printf( "ERROR: Unhandled argument!\n   %s doesn't look like a file!\n"i, ARGV[i]) > LOGFILE;
+			printf( "ERROR: Unhandled argument!\n   '%s' doesn't look like a file!\n"i, ARGV[i]) > LOGFILE;
 			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 			    } else
 				exit ERROR = 1;
@@ -520,7 +500,7 @@ BEGIN{
 			ARGC--;
 		    } else {
 			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-				printf( "'%s' looks like a readable file.\n", ARGV[i] ) > LOGFILE;
+				printf( "Checking for file-rights: '%s' looks like a readable file.\n", ARGV[i] ) > LOGFILE;
 			    }
 			close( ARGV[i] );
 		    }
@@ -577,7 +557,7 @@ BEGIN{
 		CONNTRACK[ "src" ] = CONNTRACK[ "localIP" ];
 
 	    } else if ( OS == "Linux" && LINE[ 1 ] ~ /^ipv[46]$/ && LINE[ 3 ] in L4PROTOCOLS ) {
-		# normalize Line wether /proc/net/ip_conntrack or /proc/net/nf_conntrack was read
+		# normalize Line wether /proc/net/nf_conntrack or /proc/net/ip_conntrack was read
 
 		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 			++WARNINGS[ "Apparently nf_conntrack..." ];
@@ -789,6 +769,12 @@ BEGIN{
 END{
 	if ( ERROR != 0 || ERROR != "" )
 		exit ERROR;
+
+	# predefine Index as Headline
+	INDEX = OUTPUTFORMAT[ 1 ];
+	for ( i=2; OUTPUTFORMAT[i] != ""; i++ )
+		INDEX = INDEX SUBSEP OUTPUTFORMAT[i];
+
 	if ( STATEFILE != "" ) {
 		printf( "#%s\n", INDEX ) > STATEFILE;
 		for ( i in CONNECTIONS )
@@ -811,8 +797,12 @@ END{
 				print i > LOGFILE;
 			close( LOGFILE );
 	    }
+	if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+		system("/usr/bin/lsof -c awk >> " LOGFILE );
+	    }
 
 #	# FixMe: print help if sensible
 #	if ( ARGC < 2 && NR < 1 )
 #		print HELP;
+
     }
