@@ -45,7 +45,7 @@
 # -v LOGFILE=$PATH/$FILE.log
 # 
 # 
-# v2.95 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
+# v2.96 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -744,7 +744,8 @@ BEGIN{
 		CONNTRACK[ "server" ] = CONNTRACK[ "remoteIP" ];
 		CONNTRACK[ "service" ] = CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "remotePort" ];
 		CONNTRACK[ "localPort" ] = 0;
-		if ( CONNTRACK[ "localPort" ] > ( Portrange[ 1 ] > 0 ? Portrange[ 1 ] : CONNTRACK[ "remotePort" ] )&& ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) ) {
+		if ( ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) &&	\
+		    ( CONNTRACK[ "localPort" ] > ( Portrange[ 1 ] > 0 ? Portrange[ 1 ] : CONNTRACK[ "remotePort" ] ) ) ) {
 			for ( i in CONNTRACK )
 				printf( "%s=%s\n", i, CONNTRACK[i] ) > LOGFILE;
 			printf( "\n" );
