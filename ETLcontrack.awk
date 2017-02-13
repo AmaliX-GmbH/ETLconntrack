@@ -1,4 +1,4 @@
-#!/bin/awk -f
+#!/usr/bin/awk -f
 #
 # see http://www.iptables.info/en/connection-state.html
 # 
@@ -7,6 +7,7 @@
 # accepted parameters:
 # -v OutputFormat="service,direction,localIP,remoteIP,counter"
 # -v STATEFILE=$PATH/$FILE.csv 
+# -v LOGFILE=$PATH/$FILE.log
 # -v IPblacklist="127.0.0.1 192.168.49.1"
 # -v IPwhitelist="10.119.146.19 10.110.7.244"
 # -v PORTblacklist="22 111 2048 2049"
@@ -23,6 +24,7 @@
 
 BEGIN {
 	SUBSEP=",";
+	if ( LOGFILE == "" ) LOGFILE="/dev/stderr";
 
 	# Define fields in Output and StateFile
 	if ( OutputFormat != "" ) {
@@ -54,11 +56,11 @@ BEGIN {
 				# cap maxcount at some arbitrary number as e.g. 1440
 				CONNECTIONS[ CONNINDEX ] = ( COUNTER > 24*60 ? 24*60 : COUNTER );
 				if ( DEBUG != 0 || DEBUG != "" )
-					printf( "%s = %s\n", CONNINDEX, CONNECTIONS[ CONNINDEX ] ) > "/dev/stderr";
+					printf( "%s = %s\n", CONNINDEX, CONNECTIONS[ CONNINDEX ] ) > LOGFILE;
 			    }
 		close( STATEFILE );
 		if ( DEBUG != 0 || DEBUG != "" )
-			printf("\n") > "/dev/stderr";
+			printf("\n") > LOGFILE;
 	    }
 
 	# blacklist local or remote IPs
@@ -76,6 +78,17 @@ BEGIN {
 		split( "", IPBLACKLIST );
 	    } else {
 		++IPBLACKLIST["127.0.0.1"];
+		IPBLACKLIST["10.110.7.244"]	= "denth7xr007";
+		IPBLACKLIST["10.110.11.251"]	= "denth7xr007";
+		IPBLACKLIST["10.119.146.19"]	= "denth7xr007";
+		IPBLACKLIST["10.110.9.245"]	= "denth7xr011";
+		IPBLACKLIST["10.110.13.251"]	= "denth7xr011";
+		IPBLACKLIST["10.119.163.15"]	= "denth7xr011";
+		IPBLACKLIST["10.193.22.9"]	= "ship01";
+		IPBLACKLIST["10.193.22.10"]	= "ship01";
+		IPBLACKLIST["10.193.22.11"]	= "ship01";
+		IPBLACKLIST["10.198.0.100"]	= "wasm01";
+#		IPBLACKLIST[""]	= "";
 	    }
 
 	# blacklist local or remote Ports
@@ -101,7 +114,7 @@ BEGIN {
 	# 
 	if ( HOSTNAME == "" || HOSTNAME == "localhost" ) {
 		if (( "uname -n" | getline HOSTNAME ) > 0 && HOSTNAME=="localhost" ) {
-			print "\n  Hostname unknown!\n  Please provide Hostname with parameter '-v HOSTNAME=[...]'\n" > "/dev/stderr";
+			print "\n  Hostname unknown!\n  Please provide Hostname with parameter '-v HOSTNAME=[...]'\n" > LOGFILE;
 			if (! ( DEBUG != 0 || DEBUG != "" ))
 				exit ERROR=1;
 		    }
@@ -111,7 +124,7 @@ BEGIN {
 
 	#
 	if (( "uname -s" | getline OS ) >0 && ( OS != "Linux" )) {
-		print "\n  Unknown OS \"" OS "\"!\n  Please gather netstat-data manually and run skript on supported awk-version.\n" > "/dev/stderr";
+		print "\n  Unknown OS \"" OS "\"!\n  Please gather netstat-data manually and run skript on supported awk-version.\n" > LOGFILE;
 		if (! ( DEBUG != 0 || DEBUG != "" ))
 			exit ERROR=1;
 	    }
@@ -137,7 +150,7 @@ BEGIN {
 		    } else if (( "find /sbin/ifconfig 2>/dev/null" | getline junk ) > 0) {
 			CMD=" /sbin/ifconfig -a | awk '{if ( $1 ~ /^inet$/ ) { if ($2 ~ /:/) print substr( $2, index($2,\":\")+1); else print $2;}}'"
 		    } else {
-			print "\n  Neither ip nor ifconfig found!\n  Please provide relevant IP-adresses with parameter '-v IPwhitelist=[...]'\n" > "/dev/stderr";
+			print "\n  Neither ip nor ifconfig found!\n  Please provide relevant IP-adresses with parameter '-v IPwhitelist=[...]'\n" > LOGFILE;
 			if (! ( DEBUG != 0 || DEBUG != "" ))
 				exit ERROR=1;
 		    }
@@ -149,10 +162,10 @@ BEGIN {
 		close( CMD );
 
 		if ( DEBUG != 0 || DEBUG != "" ) {
-			print CMD;
+			print CMD > LOGFILE;
 			for ( i in IPWHITELIST )
-				print i > "/dev/stderr";
-			printf("\n") > "/dev/stderr";
+				print i > LOGFILE;
+			printf("\n") > LOGFILE;
 		    }
 	    }
 
@@ -207,20 +220,25 @@ BEGIN {
 				SERVICES[ substr( Service[1], 1, 3 ) "/" port ] = ( daemon != "" ? daemon : "-" );
 
 			    } else if ( DEBUG != 0 || DEBUG != "" ) {
-				print i > "/dev/stderr";
+				print i > LOGFILE;
 			    }
 		    }
 		close( CMD );
 	    }
 
-	# if input-stream is not to be read from STDIN
-	if (( "file -L /dev/stdin" | getline STDIN ) > 0 && ( STDIN !~ /fifo/ && STDIN !~ /pipe/ ) ) {
+	# if /dev/stdin != /dev/pts/1: nothing is to be read from STDIN
+	CMD=" LC_ALL=C stat -c '%F' -L /dev/stdin ";
+	if (( CMD | getline STDIN ) > 0 && STDIN == "character special file" ) {
+		close( CMD );
+		if ( DEBUG != 0 || DEBUG != "" )
+			print STDIN > LOGFILE;
+
 		if ( ARGC==1 ) {
 			# not any input-files was provided on commandline
 
 			# check priviledge because /proc/net/ip_conntrack and /proc/net/nf_conntrack are only readable to root
 			if (( "id -u" | getline UID ) > 0 && UID>0 ) {
-				print "\n  Skript must be run as root for reading /proc/net/*_conntrack!\n" > "/dev/stderr";
+				print "\n  Skript must be run as root for reading /proc/net/*_conntrack!\n" > LOGFILE;
 				if (! ( DEBUG != 0 || DEBUG != "" ))
 					exit ERROR=1;
 			    }
@@ -236,31 +254,38 @@ BEGIN {
 				ARGV[1]="/proc/net/nf_conntrack";
 				close ("/proc/net/nf_conntrack");
 			    } else {
-				print "\n  Cannot read any conntrack-files!\n  Please modprobe depending on kernel-version either ip_conntrack or nf_conntrack!\n" > "/dev/stderr";
+				print "\n  Cannot read any conntrack-files!\n  Please modprobe depending on kernel-version either ip_conntrack or nf_conntrack!\n" > LOGFILE;
 				if (! ( DEBUG != 0 || DEBUG != "" ))
 					exit ERROR=1;
 			    }
 
 		    } else for (i = 1; i < ARGC; i++) {
+			if ( DEBUG != 0 || DEBUG != "" )
+				print i "/" ARGC-1 ":" ARGV[i];
+
 			# at least something was provided on commandline
 			# check input-files for readability
 			if (ARGV[i] ~ /^[a-zA-Z_][a-zA-Z0-9_]*=.*/ || ARGV[i] ~ /^-/ || ARGV[i] == "/dev/stdin") {
 				NoFileArgs++;
 				continue    # assignment or standard input
 			    } else if ((getline junk < ARGV[i]) < 0) {
-				printf("%s/%s: %s unreadable!\n",i,ARGC-1,ARGV[i]) > "/dev/stderr";
+				printf("%s/%s: %s unreadable!\n",i,ARGC-1,ARGV[i]) > LOGFILE;
 				close(ARGV[i]);
 				delete ARGV[i];
 				UnreadableFiles++;
 			    } else
 				close(ARGV[i]);
 		    }
+
 		if ( NoFileArgs + UnreadableFiles >= ARGC - 1 ) {
-			print "\n  Cannot read any files listed on commandline!\n  Please check arguments!" > "/dev/stderr";
+			print "\n  Cannot read any files listed on commandline!\n  Please check arguments!" > LOGFILE;
 			exit ERROR=1;
 		    }
+	    } else {
+		close( CMD );
+		if ( DEBUG != 0 || DEBUG != "" )
+			print STDIN > LOGFILE;
 	    }
-	close( "file -L /dev/stdin" );
     }
 
 
@@ -340,7 +365,7 @@ BEGIN {
 			CONNTRACK[ "persistence" ] = 59;
 
 	    } else if ( DEBUG != 0 || DEBUG != "" ) {
-		printf("%s \n", $0) > "/dev/stderr";
+		printf("%s \n", $0) > LOGFILE;
 		next;
 	    } else
 		next;
@@ -399,7 +424,7 @@ BEGIN {
 		CONNTRACK["remotePort"] = 0;
 	    } else if ( DEBUG != 0 || DEBUG != "" ) {
 		for (i in CONNTRACK)
-			printf("%s=%s\n",i,CONNTRACK[i]) > "/dev/stderr";
+			printf("%s=%s\n",i,CONNTRACK[i]) > LOGFILE;
 		printf("\n");
 		next;
 	    } else
@@ -441,9 +466,9 @@ END {
 			printf("%s,%s\n",i,CONNECTIONS[i]) > STATEFILE; 
 
 		if ( DEBUG != 0 || DEBUG != "" ) {
-			printf( "#%s\n", INDEX ) > "/dev/stderr";
+			printf( "#%s\n", INDEX ) > LOGFILE;
 			for (i in CONNECTIONS)
-				printf("%s,%s\n",i,CONNECTIONS[i]) > "/dev/stderr";
+				printf("%s,%s\n",i,CONNECTIONS[i]) > LOGFILE;
 		    }
 	    } else {
 		printf( "#%s\n", INDEX );
