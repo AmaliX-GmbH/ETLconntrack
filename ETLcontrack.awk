@@ -45,7 +45,7 @@
 # -v LOGFILE=$PATH/$FILE.log
 # 
 # 
-# v2.96 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
+# v2.97 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -238,12 +238,6 @@ BEGIN{
 				++localIPs[i];
 			close( CMD );
 
-			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-				print CMD > LOGFILE;
-				for ( i in localIPs )
-					print i > LOGFILE;
-				printf( "\n" ) > LOGFILE;
-			    }
 		    } else if ( OS == "AIX" || OS == "HP-UX" || OS == "SunOS" ) {
 			if (( "find /usr/bin/netstat 2>/dev/null" | getline NETSTAT ) > 0) {
 				#$ netstat -ni
@@ -266,13 +260,11 @@ BEGIN{
 			while ( ( CMD | getline i ) > 0 && NETSTAT != "" )
 				++localIPs[i];
 			close( CMD );
+		    }
 
-			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-				print CMD > LOGFILE;
-				for ( i in localIPs )
-					print i > LOGFILE;
-				printf( "\n" ) > LOGFILE;
-			    }
+		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+			for ( i in localIPs )
+				print "localIP: " i > LOGFILE;
 		    }
 	    }
 
@@ -327,18 +319,27 @@ BEGIN{
 
 			while (( CMD | getline i) > 0) {
 
-				lastColumn = split( i, Service );
-				if ( !( Service[ 1 ] in L4PROTOCOLS ) )
+				split( i, Service );
+				if ( !( Service[ 1 ] in L4PROTOCOLS ) ) {
+					if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+						print "Unrecognized layer4-protocol: " i > LOGFILE;
+					    }
 					continue;
+				    }
 
-				port = Service[ 4 ];
-				sub( /^.*[.:]/, "", port );
+				port_str = Service[ 4 ];
+				sub( /^.*[.:]/, "", port_str );
+				port = int( port_str );
 
 				if ( Service[ 1 ] ~ /^tcp/ && Service[ 7 ] ~ /\// ) {
 					daemon = Service[ 7 ];
 					sub( /[0-9]*\//, "", daemon );
-					if ( daemon ~ /^[0-9]$/ )
+					if ( daemon ~ /^[0-9]$/ ) {
+						if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+							print "Daemon named as a digit: " i > LOGFILE;
+						    }
 						continue;
+					    }
 					sub( /:.*/, "", daemon );
 				    } else if ( Service[ 1 ] ~ /^udp/ && Service[ 6 ] ~ /\// ) {
 					daemon = Service[ 6 ];
@@ -347,13 +348,11 @@ BEGIN{
 				    } else
 					daemon = "-";
 
-				if ( !( port >= Portrange[ 1 ] && port <= Portrange[ 2 ] ) ) {
-					sub( /[46]$/, "", Service[ 1 ] );
-					SERVICES[ Service[ 1 ] "/" port ] = daemon;
-				    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-					sub( /[46]$/, "", Service[ 1 ] );
-					SERVICES[ Service[ 1 ] "/" port ] = daemon;
-					print i > LOGFILE;
+				sub( /[46]$/, "", Service[ 1 ] );
+				SERVICES[ Service[ 1 ] "/" port ] = daemon;
+				if ( port >= Portrange[ 1 ] && port <= Portrange[ 2 ] ) {
+					if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 )
+						print "Service on a high port (" port ">" Portrange[ 1 ] "): " i > LOGFILE;
 				    }
 			    }
 			close( CMD );
@@ -386,7 +385,7 @@ BEGIN{
 				    }
 			close( CMD );
 
-		    } else if ( OS == "HP-UX" || OS == "AIX" ) {
+		    } else if ( OS == "AIX" || OS == "HP-UX" ) {
 			CMD = "netstat -an -f inet 2>/dev/null | grep -v 'ESTABLISHED'";
 			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 				print "Command to figure out services: " CMD > LOGFILE;
@@ -506,7 +505,7 @@ BEGIN{
 		    } else if ( ARGV[i] ~ /\dev\/fd\// ) {
 			# input-redirection <( command ) was used
 		    } else if ( !( ( getline junk < ARGV[i] ) > 0 ) ) {
-			++WARNINGS[ i "/" ARGC-1 ": " ARGV[i] " unreadable!\n   Skipping..." ];
+			print i "/" ARGC-1 ": " ARGV[i] " unreadable!\n   Skipping..." > LOGFILE;
 			close( ARGV[i] );
 			delete ARGV[i];
 			UnreadableFiles++;
@@ -530,12 +529,8 @@ BEGIN{
 
 #main()
 {
-	if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-		print $0 > LOGFILE;
-	    }
 	LINEWIDTH = split( $0, LINE );
 	split( "", CONNTRACK );
-
 
 	if ( OS == "SunOS" && LINE[ 1 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[:.][0-9]+/ && LINE[ 2 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[:.][0-9]+/ && LINE[ 3 ] ~ /[0-9]+/ && LINE[ 4 ] ~ /[0-9]+/ && LINE[ 5 ] ~ /[0-9]+/ && LINE[ 6 ] ~ /[0-9]+/ ) {
 		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
@@ -552,12 +547,12 @@ BEGIN{
 		CONNTRACK[ "localPort" ] = LINE[ 1 ];
 		# cleanup "^IP:"
 		sub( /^.*[.:]/, "", CONNTRACK[ "localPort" ] );
-		CONNTRACK[ "sport" ] = CONNTRACK[ "localPort" ];
+		CONNTRACK[ "sport" ] = int( CONNTRACK[ "localPort" ] );
 
 		CONNTRACK[ "remotePort" ] = LINE[ 2 ];
 		# cleanup "^IP:"
 		sub( /^.*[.:]/, "", CONNTRACK[ "remotePort" ] );
-		CONNTRACK[ "dport" ] = CONNTRACK[ "remotePort" ];
+		CONNTRACK[ "dport" ] = int( CONNTRACK[ "remotePort" ] );
 
 		CONNTRACK[ "remoteIP" ] = LINE[ 2 ];
 		# cleanup ":port$"
@@ -586,7 +581,9 @@ BEGIN{
 		CONNTRACK[ "persistence" ] = LINE[ 5 ];
 
 		for ( i=6; i<LINEWIDTH; i++ ) {
-			if ( LINE[i] ~ /\=/ ) {
+			if ( LINE[i] !~ /=/ )
+				continue;
+			    else {
 				split( LINE[i], ENTRY, "=" );
 				if (! ( ENTRY[ 1 ] in CONNTRACK ))
 					CONNTRACK[ ENTRY[ 1 ] ] = ENTRY[ 2 ];
@@ -652,12 +649,12 @@ BEGIN{
 		CONNTRACK[ "localPort" ] = LINE[ 4 ];
 		# cleanup "^IP:"
 		sub( /^.*[.:]/, "", CONNTRACK[ "localPort" ] );
-		CONNTRACK[ "sport" ] = CONNTRACK[ "localPort" ];
+		CONNTRACK[ "sport" ] = int( CONNTRACK[ "localPort" ] );
 
 		CONNTRACK[ "remotePort" ] = LINE[ 5 ];
 		# cleanup "^IP:"
 		sub( /^.*[.:]/, "", CONNTRACK[ "remotePort" ] );
-		CONNTRACK[ "dport" ] = CONNTRACK[ "remotePort" ];
+		CONNTRACK[ "dport" ] = int( CONNTRACK[ "remotePort" ] );
 
 		CONNTRACK[ "remoteIP" ] = LINE[ 5 ];
 		# cleanup ":port$"
@@ -690,9 +687,8 @@ BEGIN{
 		    else
 			CONNTRACK[ "persistence" ] = 59;
 
-
 	    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-		printf( "%s \n", $0 ) > LOGFILE;
+		++WARNINGS[ "connection bypassed: " $0 ];
 		next;
 	    } else
 		next;
@@ -702,14 +698,14 @@ BEGIN{
 		CONNTRACK[ "direction" ] = "local";
 	    } else if ( CONNTRACK[ "src" ] in localIPs ) {
 		CONNTRACK[ "localIP" ] = CONNTRACK[ "src" ];
-		CONNTRACK[ "localPort" ] = CONNTRACK[ "sport" ];
+		CONNTRACK[ "localPort" ] = int( CONNTRACK[ "sport" ] );
 		CONNTRACK[ "remoteIP" ] = CONNTRACK[ "dst" ];
-		CONNTRACK[ "remotePort" ] = CONNTRACK[ "dport" ];
+		CONNTRACK[ "remotePort" ] = int( CONNTRACK[ "dport" ] );
 	    } else if ( CONNTRACK[ "dst" ] in localIPs ) {
 		CONNTRACK[ "localIP" ] = CONNTRACK[ "dst" ];
-		CONNTRACK[ "localPort" ] = CONNTRACK[ "dport" ];
+		CONNTRACK[ "localPort" ] = int( CONNTRACK[ "dport" ] );
 		CONNTRACK[ "remoteIP" ] = CONNTRACK[ "src" ];
-		CONNTRACK[ "remotePort" ] = CONNTRACK[ "sport" ];
+		CONNTRACK[ "remotePort" ] = int( CONNTRACK[ "sport" ] );
 	    } else if (! ( "localIP" in CONNTRACK )) {
 		# either both IPs are foreign or blacklisted
 		# or some string got shortened
@@ -720,20 +716,21 @@ BEGIN{
 	# conjecture direction
 	if ( CONNTRACK[ "direction" ] == "foreign" ) {
 		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-			for ( i in CONNTRACK )
-				printf( "%s=%s\n", i, CONNTRACK[i] ) > LOGFILE;
-			printf( "\n" );
+			++WARNINGS[ "foreign connection: " $0 ];
+# FIXME: do somesing better about this!
 			next;
 		    }
 	    } else if ( CONNTRACK[ "direction" ] == "local" ) {
 		if ( CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "sport" ] in SERVICES ) {
-			CONNTRACK[ "remotePort" ] = CONNTRACK[ "sport" ];
+			CONNTRACK[ "remotePort" ] = int( CONNTRACK[ "sport" ] );
+			CONNTRACK[ "client" ] = CONNTRACK[ "localIP" ];
+			CONNTRACK[ "server" ] = CONNTRACK[ "remoteIP" ];
 		    } else {
-			CONNTRACK[ "remotePort" ] = CONNTRACK[ "dport" ];
+			CONNTRACK[ "remotePort" ] = int( CONNTRACK[ "dport" ] );
+			CONNTRACK[ "client" ] = CONNTRACK[ "remoteIP" ];
+			CONNTRACK[ "server" ] = CONNTRACK[ "localIP" ];
 		    }
 		CONNTRACK[ "client" ] = "localhost";
-		CONNTRACK[ "localIP" ] = "127.0.0.1";
-		CONNTRACK[ "remoteIP" ] = "127.0.0.1";
 		CONNTRACK[ "server" ] = "localhost";
 		CONNTRACK[ "service" ] = CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "remotePort" ];
 		CONNTRACK[ "localPort" ] = 0;
@@ -744,11 +741,10 @@ BEGIN{
 		CONNTRACK[ "server" ] = CONNTRACK[ "remoteIP" ];
 		CONNTRACK[ "service" ] = CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "remotePort" ];
 		CONNTRACK[ "localPort" ] = 0;
-		if ( ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) &&	\
-		    ( CONNTRACK[ "localPort" ] > ( Portrange[ 1 ] > 0 ? Portrange[ 1 ] : CONNTRACK[ "remotePort" ] ) ) ) {
-			for ( i in CONNTRACK )
-				printf( "%s=%s\n", i, CONNTRACK[i] ) > LOGFILE;
-			printf( "\n" );
+		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+			if ( CONNTRACK[ "localPort" ] > ( Portrange[ 1 ] > 0 ? Portrange[ 1 ] : CONNTRACK[ "remotePort" ] ) ) {
+				++WARNINGS[ "highport-connection: " $0 ];
+			    }
 		    }
 	    } else if ( CONNTRACK[ "localPort" ] == CONNTRACK[ "remotePort" ] ) {
 		CONNTRACK[ "direction" ] = "peer2peer";
@@ -761,13 +757,12 @@ BEGIN{
 		CONNTRACK[ "server" ] = CONNTRACK[ "localIP" ];
 		CONNTRACK[ "service" ] = CONNTRACK[ "l4proto" ] "/" CONNTRACK[ "localPort" ];
 		CONNTRACK[ "remotePort" ] = 0;
-	    } else if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
-		for ( i in CONNTRACK )
-			printf( "%s=%s\n", i, CONNTRACK[i] ) > LOGFILE;
-		printf( "\n" );
+	    } else {
+		if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
+			++WARNINGS[ "unrecognized direction: " $0 ];
+		    }
 		next;
-	    } else
-		next;
+	    }
 
 	CONNTRACK[ "hostname" ] = HOSTNAME;
 	if ( CONNTRACK[ "direction" ] == "outgoing" )
