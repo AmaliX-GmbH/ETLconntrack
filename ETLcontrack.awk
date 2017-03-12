@@ -51,7 +51,7 @@
 # -v LOGFILE=$PATH/$FILE.log
 # 
 # 
-# v3.0 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
+# v3.01 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -266,7 +266,7 @@ BEGIN{
 				#lan1:1    1500 10.91.176.0     10.91.176.156   1366	       0     0		  0     0
 				#lan1      1500 10.91.176.0     10.91.176.153   3487569	    0     3693219	    0     0
 
-				CMD = "netstat -ni | awk '{ if ( $1 ~ /[0-9]$/ ) print $4;}'"
+				CMD = "netstat -nia | awk '{ if ( $1 ~ /[0-9]$/ ) print $4;}'"
 				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 					print "Command to figure out IPs: " CMD > LOGFILE;
 				    }
