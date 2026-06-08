@@ -7,9 +7,7 @@
 # on Linux:	# see http://www.iptables.info/en/connection-state.html
 #	modprobe nf_conntrack_ipv4 || modprobe ip_conntrack
 #	./bin/ETLcontrack.awk 
-#   or on RHEL[5,6] and compatible systems
-#	netstat -tune --notrim	| awk -f ETLconntrack.awk
-#   or on Debian and compatible systems
+#   or, if not feasible
 #	netstat -tune --wide	| awk -f ETLconntrack.awk
 # 
 # on SunOS:
@@ -51,7 +49,7 @@
 # -v LOGFILE=$PATH/$FILE.log
 # 
 # 
-# v3.01 - Copyright (C) 2016,2017 - Henning Rohde (HeRo@amalix.de)
+# v3.02 - Copyright (C) 2016-2026 - Henning Rohde (RohdeHe@amalix.de)
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -232,7 +230,7 @@ BEGIN{
 
 		if ( OS == "Linux" ) {
 			if (( "type ip 2>/dev/null" | getline Path2IP ) > 0) {
-				CMD = "ip -4 -o a s 2>/dev/null | awk '{ print $4 }' | cut -d '/' -f 1 ";
+				CMD = "ip -o a s 2>/dev/null | awk '{ print $4 }' | cut -d '/' -f 1 ";
 				if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 					print "Command to figure out IPs: " CMD > LOGFILE;
 				    }
@@ -527,7 +525,7 @@ BEGIN{
 			if ( DEBUG != "" && DEBUG != "0" && DEBUG != 0 ) {
 			    } else
 				exit ERROR = 1;
-		    } else if ( ARGV[i] ~ /\dev\/fd\// ) {
+		    } else if ( ARGV[i] ~ /\/dev\/fd\// ) {
 			# input-redirection <( command ) was used
 		    } else if ( !( ( getline junk < ARGV[i] ) > 0 ) ) {
 			print i "/" ARGC-1 ": " ARGV[i] " unreadable!\n   Skipping..." > LOGFILE;
@@ -589,7 +587,7 @@ function replace( SEARCH, REPLACEMENT, TARGET ){
 			    }
 		    }
 
-	    } else if ( OS == "Linux" && LINE[ 5 ] ~ /\=/ &&  LINE[ 6 ] ~ /\=/ && LINE[ 1 ] in L4PROTOCOLS ) {
+	    } else if ( OS == "Linux" && LINE[ 5 ] ~ /=/ &&  LINE[ 6 ] ~ /=/ && LINE[ 1 ] in L4PROTOCOLS ) {
 
 		++NOTICE[ "Input apparently ip_conntrack on outdated Linux..." ];
 
@@ -634,9 +632,12 @@ function replace( SEARCH, REPLACEMENT, TARGET ){
 		CONNTRACK[ "dport" ] = replace( "^.*[.:]", "", LINE[ 2 ] );
 		CONNTRACK[ "dst" ] = replace( "[.:][0-9]+$", "", LINE[ 2 ] );
 
-	    } else if (	LINE[ 4 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[:.][0-9]+/ &&	\
-			LINE[ 5 ] ~ /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[:.][0-9]+/ &&	\
-			LINE[ 1 ] in L4PROTOCOLS ) {
+	    } else if ( \
+				LINE[ 4 ] ~ /^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])|(([0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|([0-9A-Fa-f]{1,4}:){1,7}:|:(:[0-9A-Fa-f]{1,4}){1,7}|([0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}|([0-9A-Fa-f]{1,4}:){1,5}(:[0-9A-Fa-f]{1,4}){1,2}|([0-9A-Fa-f]{1,4}:){1,4}(:[0-9A-Fa-f]{1,4}){1,3}|([0-9A-Fa-f]{1,4}:){1,3}(:[0-9A-Fa-f]{1,4}){1,4}|([0-9A-Fa-f]{1,4}:){1,2}(:[0-9A-Fa-f]{1,4}){1,5}|[0-9A-Fa-f]{1,4}:(:[0-9A-Fa-f]{1,4}){1,6}|:(:[0-9A-Fa-f]{1,4}){1,6})):[0-9]{1,5}$/ \
+			&&	\
+				LINE[ 5 ] ~ /^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])|(([0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|([0-9A-Fa-f]{1,4}:){1,7}:|:(:[0-9A-Fa-f]{1,4}){1,7}|([0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}|([0-9A-Fa-f]{1,4}:){1,5}(:[0-9A-Fa-f]{1,4}){1,2}|([0-9A-Fa-f]{1,4}:){1,4}(:[0-9A-Fa-f]{1,4}){1,3}|([0-9A-Fa-f]{1,4}:){1,3}(:[0-9A-Fa-f]{1,4}){1,4}|([0-9A-Fa-f]{1,4}:){1,2}(:[0-9A-Fa-f]{1,4}){1,5}|[0-9A-Fa-f]{1,4}:(:[0-9A-Fa-f]{1,4}){1,6}|:(:[0-9A-Fa-f]{1,4}){1,6})):[0-9]{1,5}$/ \
+			&&	\
+				LINE[ 1 ] in L4PROTOCOLS ) {
 		## Linux
 		#$ netstat -tune --notrim || netstat -tune --wide
 		#Active Internet connections (w/o servers)
